@@ -1,0 +1,58 @@
+%\documentclass[12pt, a3paper]{extarticle}
+\documentclass[12pt, a4paper]{article}
+\usepackage{graphicx, rotating}
+\usepackage[margin=0.8in]{geometry}
+\graphicspath{{./}}
+\usepackage[utf8]{inputenc}
+\usepackage{cite}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{mathtools}
+\DeclarePairedDelimiter{\ceil}{\lceil}{\rceil}
+\newcommand{\bo}{\textbf}
+\newcommand{\ti}{\textit}
+\newcommand{\ul}{\underline}
+\title{Design Document Review, CS628A}
+%\subtitle{Assignment 1}
+\author{Mayank Sharma 160392\\ Shivank Garg 160658}
+\date{February 25 2019}
+
+\begin{document}
+%\newcommand{\b}{\textbf}
+\maketitle
+\vspace{-3em}
+\section{Group Assigned}
+		 Manish Kumar, 150379 \& Anshul Vijayvergiya, 150113
+\section{Review}
+
+\begin{table}[ht]
+	\begin{tabular}{|p{6cm}|p{1.2cm}|p{8cm}|}
+        \hline
+        \bo{Property} & \bo{Points} & \bo{Reason} \\
+        \hline
+	User creation and authentication (properties 1 and 2)& \bo{4}&
+No mention as to where the UserWrapper struct is stored in DataStore. That structure is essential for verifying the Integrity of UserData.  
+		\\ 
+ 	\hline
+		Integrity preservation in the simple secure client (property 3)& \bo{5} & \\  
+ 	\hline
+		Confidentiality in the simple secure client (property 4)& \bo{5} & \\  
+ 	\hline
+	AppendFile implementation and efficiency (property 5)& \bo{3} & How are they storing the "File Part" serial number? In the case that the program is stopped and re-run, they would lose the file part numbers since they haven't stored them in DataStore.	\\  
+ 	\hline
+		Sharing implementation (property 6)&\bo{5} & \\  
+ 	\hline
+		Revocation implementation (property 7)& \bo{5}& \\  
+ 	\hline
+		Clarity of the design document& \bo{4} & 
+	
+The FileContent struct isn't stored anywhere (or that the design doc doesn't mention where they will store it). Assuming that they store in differently from User struct, they will be fine. 
+		\\  
+ 	\hline
+	\end{tabular}
+\end{table}
+\section{Summary}
+For improving AppendFile, you may change your FilePtr struct to the last Part Number of a file. 
+You had to consider the case that your program may be stopped, and that values stored in variables will get lost on re-run. So, all data needs to be stored in DataStore. Rest of the design is fine, and shall work well when implemented.
+\end{document}
+

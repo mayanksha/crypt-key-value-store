@@ -4,7 +4,7 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
-
+	"time"
 	// You neet to add with
 	// go get github.com/fenilfadadu/CS628-assn1/userlib
 	"github.com/fenilfadadu/CS628-assn1/userlib"
@@ -78,13 +78,37 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
  *  []byte hmac
  *}*/
 type User struct {
-	Username     string //Encrypted Form
-	SymmetricKey string //Encrypted value of symmetric key, enc via Pub key of mine
-	PrivateKey   string //Encrypted with the actual password
-	HMAC         string // H(password + username + SymmetricKey + PrivateKey) used for one time check on integrity
+	Username     string                    // Encrypted with the Symmetric Key
+	SymmetricKey string                    // Argon2(password), given, password has high entropy
+	PrivateKey   string                    // Encrypted with the Symmetric Key
+	FileKeys     map[string]FileSharingKey // Indexed by hash(filename), FileSharingKey maps to the Current Sharing Key of the File
+	HMAC         string                    // H(username + SymmetricKey + PrivateKey + FileKeys)
+}
+type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
+type Data struct {
+	UserData     map[string]User
+	FileBlocks   map[string]Block
+	FileMetadata map[string]MetaData
+}
+type MetaData struct {
+	Owner            string            // hash(Owner)
+	LastEditBy       string            // hash(LastEditByUserName)
+	LastEditTime     time.Time         // hash(LastEditByUserName)
+	FilenameMap      map[string]string // Map from hash(username) to encrypted filename for that user (encrypted with symmetric key of that user)
+	GenesisBlock     string            // HashValue(Owner + FilenameMap[Owner] + uuid nonce)
+	GenesisUUIDNonce string
+	LastUUIDNonce    string
+	LastBlock        string // HashValue(LastEditBy + FilenameMap[LastEditBy] + uuid nonce)
+	HMAC             string // HMAC(key = FileSharingKey, Data = Owner, LastEditBy, LastEditTime, GenesisBlock, GenesisBlockNonce, LastUUIDNonce, LastBlock)
 }
 
-type 
+type Block struct {
+	Content       []byte
+	PrevBlockHash string
+	NextBlockHash string
+	HMAC          string
+}
+
 // This creates a user.  It will only be called once for a user
 // (unless the keystore and datastore are cleared during testing purposes)
 

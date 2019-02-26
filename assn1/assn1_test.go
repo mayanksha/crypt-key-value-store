@@ -3,12 +3,19 @@ package assn1
 import "github.com/fenilfadadu/CS628-assn1/userlib"
 import "testing"
 import "reflect"
+import (
+	"crypto/sha256"
+)
 
 // You can actually import other stuff if you want IN YOUR TEST
 // HARNESS ONLY.  Note that this is NOT considered part of your
 // solution, but is how you make sure your solution is correct.
 
 func TestInit(t *testing.T) {
+	t.Logf("%x \n", sha256.Sum256([]byte("app")))
+	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
+	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
+	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
 	t.Log("Initialization test")
 	userlib.DebugPrint = true
 	//	someUsefulThings()

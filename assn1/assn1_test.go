@@ -22,7 +22,6 @@ func TestInit(t *testing.T) {
 	if err != nil {
 		t.Error("Got RSA error", err)
 	}
-	t.Log(key)
 	userlib.KeystoreSet(aliceUser, key.PublicKey)
 
 	if err != nil {

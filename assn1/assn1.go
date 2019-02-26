@@ -4,6 +4,7 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
+	"hash"
 	"time"
 	// You neet to add with
 	// go get github.com/fenilfadadu/CS628-assn1/userlib
@@ -78,11 +79,12 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
  *  []byte hmac
  *}*/
 type User struct {
+	/*Username need not be encrypted with symmetric key*/
 	Username     string                    // Encrypted with the Symmetric Key
 	SymmetricKey string                    // Argon2(password), given, password has high entropy
 	PrivateKey   string                    // Encrypted with the Symmetric Key
 	FileKeys     map[string]FileSharingKey // Indexed by hash(filename), FileSharingKey maps to the Current Sharing Key of the File
-	HMAC         string                    // H(username + SymmetricKey + PrivateKey + FileKeys)
+	HMAC         hash.Hash                 // H(username + SymmetricKey + PrivateKey + FileKeys)
 }
 type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
 type Data struct {
@@ -91,22 +93,27 @@ type Data struct {
 	FileMetadata map[string]MetaData
 }
 type MetaData struct {
-	Owner            string            // hash(Owner)
+	Owner            string
 	LastEditBy       string            // hash(LastEditByUserName)
 	LastEditTime     time.Time         // hash(LastEditByUserName)
 	FilenameMap      map[string]string // Map from hash(username) to encrypted filename for that user (encrypted with symmetric key of that user)
 	GenesisBlock     string            // HashValue(Owner + FilenameMap[Owner] + uuid nonce)
 	GenesisUUIDNonce string
 	LastUUIDNonce    string
-	LastBlock        string // HashValue(LastEditBy + FilenameMap[LastEditBy] + uuid nonce)
-	HMAC             string // HMAC(key = FileSharingKey, Data = Owner, LastEditBy, LastEditTime, GenesisBlock, GenesisBlockNonce, LastUUIDNonce, LastBlock)
+	LastBlock        string    // HashValue(LastEditBy + FilenameMap[LastEditBy] + uuid nonce)
+	HMAC             hash.Hash // HMAC(key = FileSharingKey, Data = Owner, LastEditBy, LastEditTime, GenesisBlock, GenesisBlockNonce, LastUUIDNonce, LastBlock)
 }
 
 type Block struct {
+	Owner         string
 	Content       []byte
 	PrevBlockHash string
-	NextBlockHash string
-	HMAC          string
+	HMAC          hash.Hash
+}
+type temporaryBlock struct {
+	Owner         string
+	Content       []byte
+	PrevBlockHash string
 }
 
 // This creates a user.  It will only be called once for a user
@@ -125,23 +132,23 @@ type Block struct {
 
 // You can assume the user has a STRONG password
 
-/*func InitUser(username string, password string) (userdataptr *User, err error) {
- *  // var userdata User
- *  // Val type map[string]User
- *  //val, ok := userlib.DatastoreGet("UserData")
- *  // if !ok {
- *  // 	userlib.DebugMsg("Error!")
- *  // }
- *  // var userDataStruct []byte
- *  // json.Unmarshal(val, &userDataStruct)
- *  // generate priv pub key
- *  // (NOT NEEDED) call uuid to get salt
- *  // SymmKey = Argon2(Password)
- *  // (NOT NEEDED)SymmKey = Argon2(Password + salt)
- *  // User.Password = pubKeyHash(SymmKey)
- *  // User.Username = CFBEncrypter(SymmKey, username)
- *  // return &userdata, err
- *}*/
+func InitUser(username string, password string) (userdataptr *User, err error) {
+	// Val type map[string]User
+	//val, ok := userlib.DatastoreGet("UserData")
+	// if !ok {
+	// 	userlib.DebugMsg("Error!")
+	// }
+	// var userDataStruct []byte
+	// json.Unmarshal(val, &userDataStruct)
+	// generate priv pub key
+	// (NOT NEEDED) call uuid to get salt
+	// SymmKey = Argon2(Password)
+	// (NOT NEEDED)SymmKey = Argon2(Password + salt)
+	// User.Password = pubKeyHash(SymmKey)
+	// User.Username = CFBEncrypter(SymmKey, username)
+	var userdata User
+	return &userdata, err
+}
 
 // This fetches the user information from the Datastore.  It should
 // fail with an error if the user/password is invalid, or if the user
@@ -154,6 +161,34 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 //
 // The name of the file should NOT be revealed to the datastore!
 func (userdata *User) StoreFile(filename string, data []byte) {
+	var block Block
+	var metadata MetaData
+	var temp temporaryBlock
+	_, ok := userlib.DatastoreGet("FileBlocks")
+	if !ok {
+		initData := make(map[string]Block)
+		bytes, err := json.Marshal(initData)
+		if err != nil {
+
+		}
+		userlib.DatastoreSet("FileBlocks", bytes)
+	}
+
+	metadata.Owner = userdata.Username
+	// Block Details for Data
+	block.Content = data
+	block.Owner = userdata.Username
+	block.PrevBlockHash = ""
+
+	temp.Content = data
+	temp.Owner = userdata.Username
+	temp.PrevBlockHash = ""
+
+	bytes, err := json.Marshal(temp)
+	if err != nil {
+
+	}
+	block.HMAC = userlib.NewHMAC(bytes)
 }
 
 // This adds on to an existing file.

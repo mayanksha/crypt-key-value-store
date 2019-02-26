@@ -78,7 +78,7 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
  *  []byte hmac
  *}*/
 type User struct {
-	Username     string                    // Encrypted with the Symmetric Key
+	Username     string
 	SymmetricKey string                    // Argon2(password), given, password has high entropy
 	PrivateKey   string                    // Encrypted with the Symmetric Key
 	FileKeys     map[string]FileSharingKey // Indexed by hash(filename), FileSharingKey maps to the Current Sharing Key of the File
@@ -106,7 +106,7 @@ type Block struct {
 	Content       []byte
 	PrevBlockHash string
 	NextBlockHash string
-	HMAC          string
+	HMAC          []byte
 }
 
 // This creates a user.  It will only be called once for a user
@@ -125,28 +125,16 @@ type Block struct {
 
 // You can assume the user has a STRONG password
 
-/*func InitUser(username string, password string) (userdataptr *User, err error) {
- *  // var userdata User
- *  // Val type map[string]User
- *  //val, ok := userlib.DatastoreGet("UserData")
- *  // if !ok {
- *  // 	userlib.DebugMsg("Error!")
- *  // }
- *  // var userDataStruct []byte
- *  // json.Unmarshal(val, &userDataStruct)
- *  // generate priv pub key
- *  // (NOT NEEDED) call uuid to get salt
- *  // SymmKey = Argon2(Password)
- *  // (NOT NEEDED)SymmKey = Argon2(Password + salt)
- *  // User.Password = pubKeyHash(SymmKey)
- *  // User.Username = CFBEncrypter(SymmKey, username)
- *  // return &userdata, err
- *}*/
+func InitUser(username string, password string) (userdataptr *User, err error) {
+	var userdata User
+	return &userdata, err
+}
 
 // This fetches the user information from the Datastore.  It should
 // fail with an error if the user/password is invalid, or if the user
 // data was corrupted, or if the user can't be found.
 func GetUser(username string, password string) (userdataptr *User, err error) {
+
 	return
 }
 

@@ -195,9 +195,41 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 // This fetches the user information from the Datastore.  It should
 // fail with an error if the user/password is invalid, or if the user
 // data was corrupted, or if the user can't be found.
-func GetUser(username string, password string) (userdataptr *User, err error) {
 
-	return
+func GetUser(username string, password string) (userdataptr *User, err error) {
+	UserDataString := hex.EncodeToString(userlib.Argon2Key([]byte("UserDataString"), nil, uint32(userlib.HashSize)))
+	val, ok := userlib.DatastoreGet(UserDataString)
+	//check if the hashedusername exists
+	if !ok {
+		return nil, nil
+	}
+	var userdata User
+	json.Unmarshal(val, &userdata)
+	authPass := userlib.Argon2Key([]byte(password), nil, 2*uint32(userlib.HashSize))
+	//check if the password is correct
+	if userlib.Equal(userdata.SymmetricKey, authPass) {
+		return nil, nil
+	}
+	//calculate newHMAC of fetched User
+	macInit := userlib.NewHMAC(userdata.SymmetricKey)
+
+	macInit.Write([]byte(userdata.Username))
+	var bytes []byte
+	bytes, err = json.Marshal(userdata.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	macInit.Write(bytes)
+	bytes, err = json.Marshal(userdata.FileKeys)
+	if err != nil {
+		return nil, err
+	}
+	//check if HMAC is same(not tempered)
+	if userlib.Equal(macInit.Sum(nil), userdata.HMAC) {
+		return nil, nil
+	}
+
+	return &userdata, nil
 }
 
 // This stores a file in the datastore.

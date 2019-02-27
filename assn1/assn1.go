@@ -4,6 +4,7 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
+	/*"fmt"*/
 	"hash"
 	"time"
 	// You neet to add with
@@ -81,17 +82,17 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
 type User struct {
 	/*Username need not be encrypted with symmetric key*/
 	Username     string
-	SymmetricKey string                    // Argon2(password), given, password has high entropy
-	PrivateKey   string                    // Encrypted with the Symmetric Key
+	SymmetricKey []byte                    // Argon2(password), given, password has high entropy
+	PrivateKey   userlib.PrivateKey        // Encrypted with the Symmetric Key
 	FileKeys     map[string]FileSharingKey // Indexed by hash(filename), FileSharingKey maps to the Current Sharing Key of the File
-	HMAC         hash.Hash                 // H(username + SymmetricKey + PrivateKey + FileKeys)
+	HMAC         []byte                    // H(username + SymmetricKey + PrivateKey + FileKeys)
 }
 type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
-type Data struct {
-	UserData     map[string]User
-	FileBlocks   map[string]Block
-	FileMetadata map[string]MetaData
-}
+/*type Data struct {
+ *  UserData     map[string]User
+ *  FileBlocks   map[string]Block
+ *  FileMetadata map[string]MetaData
+ *}*/
 type MetaData struct {
 	Owner            string
 	LastEditBy       string            // hash(LastEditByUserName)
@@ -135,6 +136,59 @@ type temporaryBlock struct {
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
+	UserDataString := hex.EncodeToString(userlib.Argon2Key([]byte("UserDataString"), nil, uint32(userlib.HashSize)))
+	_, ok := userlib.DatastoreGet(UserDataString)
+	if !ok {
+		newUserMap := make(map[string]User)
+		bytes, err := json.Marshal(newUserMap)
+		if err != nil {
+			return nil, err
+		}
+		userlib.DatastoreSet(UserDataString, bytes)
+	}
+	val, ok := userlib.DatastoreGet(UserDataString)
+	var userDataMap map[string]User
+	json.Unmarshal(val, &userDataMap)
+
+	hashedUsername := hex.EncodeToString(userlib.Argon2Key([]byte(username), nil, uint32(userlib.HashSize)))
+
+	key, err := userlib.GenerateRSAKey()
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the Public Key in Keystore
+	pubkey := key.PublicKey
+	userlib.KeystoreSet(username, pubkey)
+
+	// Populate User struct
+	userdata.Username = username
+	userdata.SymmetricKey = userlib.Argon2Key([]byte(password), nil, 2*uint32(userlib.HashSize))
+	userdata.PrivateKey = *key
+	userdata.FileKeys = make(map[string]FileSharingKey)
+
+	macInit := userlib.NewHMAC(userdata.SymmetricKey)
+
+	macInit.Write([]byte(userdata.Username))
+	var bytes []byte
+	bytes, err = json.Marshal(userdata.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	macInit.Write(bytes)
+	bytes, err = json.Marshal(userdata.FileKeys)
+	if err != nil {
+		return nil, err
+	}
+	userdata.HMAC = macInit.Sum(nil)
+
+	// To-do CFB encryption using Symmetric Key
+	userDataMap[hashedUsername] = userdata
+	bytes, err = json.Marshal(userDataMap)
+	if err != nil {
+		return nil, err
+	}
+	userlib.DatastoreSet(UserDataString, bytes)
 	return &userdata, err
 }
 

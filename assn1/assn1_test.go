@@ -5,6 +5,7 @@ import "testing"
 import "reflect"
 import (
 	"crypto/sha256"
+	"encoding/hex"
 )
 
 // You can actually import other stuff if you want IN YOUR TEST
@@ -13,7 +14,8 @@ import (
 
 func TestInit(t *testing.T) {
 	t.Logf("%x \n", sha256.Sum256([]byte("app")))
-	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
+	temp := hex.EncodeToString(userlib.Argon2Key([]byte("app"), nil, 32))
+	t.Logf("%v \n", temp)
 	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
 	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
 	t.Log("Initialization test")
@@ -24,6 +26,12 @@ func TestInit(t *testing.T) {
 	aliceUser := "alice"
 	alicePass := "foobar"
 	u, err := InitUser(aliceUser, alicePass)
+	if err != nil {
+		t.Error("Got InitUser Error", err)
+	} else {
+		t.Logf("Username =  %s\n", u.Username)
+		t.Logf("HMAC = %x", u.HMAC)
+	}
 	// key is private key
 	key, err := userlib.GenerateRSAKey()
 	if err != nil {
@@ -36,7 +44,6 @@ func TestInit(t *testing.T) {
 		t.Error("Failed to initialize user", err)
 	}
 	// t.Log() only produces output if you run with "go test -v"
-	t.Log("Got user", u)
 	// You probably want many more tests here.
 }
 

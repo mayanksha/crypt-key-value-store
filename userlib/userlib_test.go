@@ -13,6 +13,7 @@ import "encoding/hex"
 // And "go test -cover" to check your code coverage in your tests
 
 func TestDatastore(t *testing.T) {
+	t.Log(HashSize)
 	DatastoreSet("foo", []byte("bar"))
 	data, valid := DatastoreGet("bar")
 	if valid {

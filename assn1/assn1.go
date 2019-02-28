@@ -148,7 +148,7 @@ type Block struct {
 	PrevBlockHash string
 	HMAC          []byte
 }
-type temporaryBlock struct {
+type temporaryBlock struct { //is it of any use?
 	Owner         string
 	Content       []byte
 	PrevBlockHash string
@@ -395,6 +395,53 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 //
 // It should give an error if the file is corrupted in any way.
 func (userdata *User) LoadFile(filename string) (data []byte, err error) {
+	metadataIndex := metaDataString + userdata.Username + filename
+	metadataIndexHashed := Argon2Hash(metadataIndex)
+	val, ok := userlib.DatastoreGet(metadataIndexHashed)
+
+	// For first store, file must not be present
+	if !ok {
+		errString := "Error 404 : " + filename + "not found"
+		panic(errString)
+		return
+	}
+	//Decrypt everything you encrypt
+	//get file key
+	//fileKey := userdata.FileKeys[filename]
+
+	//decrypt the file-TODO
+	var metadata MetaData
+	json.Unmarshal(val, &metadata)
+
+	//check the HMAC
+	calcMetadataHMAC, err := MetadataHMAC(metadata, userdata.SymmetricKey)
+
+	if !userlib.Equal(calcMetadataHMAC, metadata.HMAC) {
+		errString := "Something Wrong with MetaDataHMAC"
+		panic(errString)
+		return
+	}
+
+	//get the file blocks and TODO- decrypt them
+	val, ok = userlib.DatastoreGet(metadata.GenesisBlock)
+	// check if block is present or not
+	if !ok {
+		errString := "Error 404 :  " + "Not Found"
+		panic(errString)
+		return
+	}
+
+	var block Block
+	json.Unmarshal(val, &block)
+	calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
+
+	//check block  HMAC
+	if !userlib.Equal(calcBlockHMAC, block.HMAC) {
+		errString := "Something Wrong with BlockHMAC"
+		panic(errString)
+	}
+
+	//TODO	//traverse all block until LastBlock and check their integrity
 	return
 }
 

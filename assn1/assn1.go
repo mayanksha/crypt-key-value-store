@@ -31,6 +31,45 @@ import (
 	"errors"
 )
 
+// Helper function to get hex encoded Argon2 hash -- Outputs 32 bytes
+func Argon2Hash(toHash string) string {
+	return hex.EncodeToString(userlib.Argon2Key([]byte(toHash), nil, uint32(userlib.HashSize)))
+}
+
+// Helper function to get hex encoded Argon2 hash of password -- Outputs 64 bytes
+func Argon2PasswordHash(password string) string {
+	return hex.EncodeToString(userlib.Argon2Key([]byte(password), nil, 2*uint32(userlib.HashSize)))
+}
+
+func MetadataHMAC(metadata MetaData, SymmetricKey []byte) ([]byte, error) {
+	macInit := userlib.NewHMAC(SymmetricKey)
+
+	macInit.Write([]byte(metadata.Owner))
+	bytes, err := json.Marshal(metadata.FilenameMap)
+	if err != nil {
+		return nil, err
+	}
+	macInit.Write(bytes)
+	macInit.Write([]byte(metadata.GenesisBlock))
+	macInit.Write([]byte(metadata.GenesisUUIDNonce.String()))
+	macInit.Write([]byte(metadata.LastBlock))
+	macInit.Write([]byte(metadata.LastUUIDNonce.String()))
+	return macInit.Sum(nil), nil
+}
+
+func BlockHMAC(block Block, SymmetricKey []byte) ([]byte, error) {
+	macInit := userlib.NewHMAC(SymmetricKey)
+
+	macInit.Write([]byte(block.Owner))
+	macInit.Write(block.Content)
+	macInit.Write([]byte(block.PrevBlockHash))
+	return macInit.Sum(nil), nil
+}
+
+var fileBlocksString string = Argon2Hash("FileBlocksString")
+var metaDataString string = Argon2Hash("MetaDataString")
+var userDataString string = Argon2Hash("UserDataString")
+
 // This serves two purposes: It shows you some useful primitives and
 // it suppresses warnings for items not being imported
 func someUsefulThings() {
@@ -83,7 +122,7 @@ type User struct {
 	Username     string
 	SymmetricKey []byte                    // Argon2(password), given, password has high entropy
 	PrivateKey   userlib.PrivateKey        // Encrypted with the Symmetric Key
-	FileKeys     map[string]FileSharingKey // Indexed by hash(filename), FileSharingKey maps to the Current Sharing Key of the File
+	FileKeys     map[string]FileSharingKey // Indexed by filename to FileSharingKey
 	HMAC         []byte                    // H(username + SymmetricKey + PrivateKey + FileKeys)
 }
 type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
@@ -93,14 +132,13 @@ type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
  *  FileMetadata map[string]MetaData
  *}*/
 type MetaData struct {
-	Owner      string
-	LastEditBy string // hash(LastEditByUserName)
-	/*LastEditTime     time.Time         // hash(LastEditByUserName)*/
-	FilenameMap      map[string]string // Map from hash(username) to encrypted filename for that user (encrypted with symmetric key of that user)
+	Owner            string
+	LastEditBy       string            // hash(LastEditByUserName)
+	FilenameMap      map[string][]byte // Map from hash(username) to encrypted filename for that user (encrypted with symmetric key of that user)
 	GenesisBlock     string            // HashValue(Owner + FilenameMap[Owner] + uuid nonce)
-	GenesisUUIDNonce string
-	LastUUIDNonce    string
+	GenesisUUIDNonce uuid.UUID
 	LastBlock        string // HashValue(LastEditBy + FilenameMap[LastEditBy] + uuid nonce)
+	LastUUIDNonce    uuid.UUID
 	HMAC             []byte // HMAC(key = FileSharingKey, Data = Owner, LastEditBy, LastEditTime, GenesisBlock, GenesisBlockNonce, LastUUIDNonce, LastBlock)
 }
 
@@ -134,22 +172,21 @@ type temporaryBlock struct {
 // You can assume the user has a STRONG password
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
-	var userdata User
-	UserDataString := hex.EncodeToString(userlib.Argon2Key([]byte("UserDataString"), nil, uint32(userlib.HashSize)))
-	_, ok := userlib.DatastoreGet(UserDataString)
+
+	_, ok := userlib.DatastoreGet(userDataString)
 	if !ok {
 		newUserMap := make(map[string]User)
 		bytes, err := json.Marshal(newUserMap)
 		if err != nil {
 			return nil, err
 		}
-		userlib.DatastoreSet(UserDataString, bytes)
+		userlib.DatastoreSet(userDataString, bytes)
 	}
-	val, ok := userlib.DatastoreGet(UserDataString)
+	val, ok := userlib.DatastoreGet(userDataString)
 	var userDataMap map[string]User
 	json.Unmarshal(val, &userDataMap)
 
-	hashedUsername := hex.EncodeToString(userlib.Argon2Key([]byte(username), nil, uint32(userlib.HashSize)))
+	hashedUsername := Argon2Hash(username)
 
 	key, err := userlib.GenerateRSAKey()
 	if err != nil {
@@ -161,8 +198,9 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userlib.KeystoreSet(username, pubkey)
 
 	// Populate User struct
+	var userdata User
 	userdata.Username = username
-	userdata.SymmetricKey = userlib.Argon2Key([]byte(password), nil, 2*uint32(userlib.HashSize))
+	userdata.SymmetricKey = []byte(Argon2PasswordHash(password))
 	userdata.PrivateKey = *key
 	userdata.FileKeys = make(map[string]FileSharingKey)
 
@@ -187,7 +225,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	if err != nil {
 		return nil, err
 	}
-	userlib.DatastoreSet(UserDataString, bytes)
+	userlib.DatastoreSet(userDataString, bytes)
 	return &userdata, err
 }
 
@@ -199,12 +237,11 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 *		TO-DO: check for encryption, make all the errors same
  */
 func GetUser(username string, password string) (userdataptr *User, err error) {
-	UserDataString := hex.EncodeToString(userlib.Argon2Key([]byte("UserDataString"), nil, uint32(userlib.HashSize)))
 	// val contains the byte slice for the whole userDataMap
-	val, ok := userlib.DatastoreGet(UserDataString)
+	val, ok := userlib.DatastoreGet(userDataString)
 	//check if the hashedusername exists
 	if !ok {
-		err := errors.New("[GetUser]: UserDataString wasn't indexed in Datastore.")
+		err := errors.New("[GetUser]: userDataString wasn't indexed in Datastore.")
 		return nil, err
 	}
 	var userDataMap map[string]User
@@ -212,7 +249,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	json.Unmarshal(val, &userDataMap)
 
 	//check if the user exists in map
-	hashedUsername := hex.EncodeToString(userlib.Argon2Key([]byte(username), nil, uint32(userlib.HashSize)))
+	hashedUsername := Argon2Hash(username)
 	userdata, ok = userDataMap[hashedUsername]
 	if !ok {
 		err := errors.New("[GetUser]: User not present in Datastore.")
@@ -220,7 +257,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	//check if the password is correct
-	authPass := userlib.Argon2Key([]byte(password), nil, 2*uint32(userlib.HashSize))
+	authPass := []byte(Argon2PasswordHash(password))
 	if userlib.Equal(userdata.SymmetricKey, authPass) != true {
 		err := errors.New("[GetUser]: User's password doesn't match.")
 		return nil, err
@@ -252,34 +289,96 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 // This stores a file in the datastore.
 // The name of the file should NOT be revealed to the datastore!
 func (userdata *User) StoreFile(filename string, data []byte) {
-	var block Block
-	var metadata MetaData
-	var temp temporaryBlock
-	_, ok := userlib.DatastoreGet("FileBlocks")
-	if !ok {
-		initData := make(map[string]Block)
-		bytes, err := json.Marshal(initData)
-		if err != nil {
+	/* TO-DO: Store encrypted filenames in FilenameMap (is it even useful?)
+	* Perform Full Encryption
+	 */
 
-		}
-		userlib.DatastoreSet("FileBlocks", bytes)
+	// The file's MetaData is indexed into datastore by the string
+	// hash(metaDataString + username + randUUID + filename)
+	// The MetaData stores information about the blocks of file
+
+	metadataIndex := metaDataString + userdata.Username + filename
+	metadataIndexHashed := Argon2Hash(metadataIndex)
+	_, ok := userlib.DatastoreGet(metadataIndexHashed)
+
+	// For first store, file must not be present
+	if ok {
+		errString := "[StoreFile] [Argon2Key MetadataHash Collision]: " + metadataIndex + " Collided"
+		panic(errString)
+		return
 	}
 
+	// Random UUID in string form
+	randUUID := uuid.New().String()
+	fileKey := Argon2Hash(randUUID)
+
+	// Before anything else, update the User struct with new fileKey
+	userdata.FileKeys[filename] = FileSharingKey(fileKey)
+
+	hashedUsername := Argon2Hash(userdata.Username)
+
+	// Populate the file metadata
+	var metadata MetaData
 	metadata.Owner = userdata.Username
-	// Block Details for Data
+	metadata.LastEditBy = hashedUsername
+	metadata.FilenameMap = make(map[string][]byte)
+	metadata.FilenameMap[hashedUsername] = []byte(Argon2Hash(filename))
+	metadata.GenesisUUIDNonce = uuid.New()
+
+	genesisBlockNumber := 0
+	blockIndex := fileBlocksString + userdata.Username + metadata.GenesisUUIDNonce.String() + string(genesisBlockNumber) + filename
+	blockIndexHashed := Argon2Hash(blockIndex)
+	metadata.GenesisBlock = blockIndexHashed
+
+	metadata.LastUUIDNonce = metadata.GenesisUUIDNonce
+	metadata.LastBlock = metadata.GenesisBlock
+
+	// Get the HMAC of the current metadata structure
+	hmac, err := MetadataHMAC(metadata, userdata.SymmetricKey)
+	if err != nil {
+		panic(err)
+		return
+	}
+	metadata.HMAC = hmac
+
+	// Marshal Metadata and store in Datastore
+	bytes, err := json.Marshal(metadata)
+	if err != nil {
+		panic(err)
+		return
+	}
+	userlib.DatastoreSet(metadataIndexHashed, bytes)
+
+	_, ok = userlib.DatastoreGet(metadata.GenesisBlock)
+
+	// For first store, block must not be present
+	if ok {
+		errString := "[StoreFile] [Argon2Key BlockHash Collision]: " + blockIndex + " Collided"
+		panic(errString)
+		return
+	}
+
+	// TO-DO Encrypt the below struct
+	var block Block
+	block.Owner = metadata.Owner
 	block.Content = data
-	block.Owner = userdata.Username
 	block.PrevBlockHash = ""
 
-	temp.Content = data
-	temp.Owner = userdata.Username
-	temp.PrevBlockHash = ""
+	// Get the HMAC of the current block structure
+	hmac, err = BlockHMAC(block, userdata.SymmetricKey)
+	if err != nil {
+		panic(err)
+		return
+	}
+	block.HMAC = hmac
 
-	/*  bytes, err := json.Marshal(temp)
-	 *  if err != nil {
-	 *
-	 *  }*/
-	/*block.HMAC = userlib.NewHMAC(bytes)*/
+	bytes, err = json.Marshal(block)
+	if err != nil {
+		panic(err)
+		return
+	}
+	userlib.DatastoreSet(metadata.GenesisBlock, bytes)
+	return
 }
 
 // This adds on to an existing file.

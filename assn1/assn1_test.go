@@ -49,12 +49,22 @@ func TestInit(t *testing.T) {
 
 func TestStorage(t *testing.T) {
 	// And some more tests, because
-	u, err := GetUser("alice", "fubar")
+	username := "alice"
+	password := "fubar"
+
+	t.Logf("username = %v, password = %v\n", username, password)
+	u, err := GetUser(username, password)
 	if err != nil {
 		t.Error("Failed to reload user", err)
-		return
 	}
-	t.Log("Loaded user", u)
+
+	password = "foobar"
+	t.Logf("username = %v, password = %v\n", username, password)
+	u, err = GetUser(username, password)
+	if err != nil {
+		t.Error("Failed to reload user", err)
+	}
+	t.Logf("Loaded user: username = %v\nHMAC = %x\n", u.Username, u.HMAC)
 
 	v := []byte("This is a test")
 	u.StoreFile("file1", v)

@@ -5,8 +5,7 @@ package assn1
 
 import (
 	/*"fmt"*/
-	"hash"
-	"time"
+	/*"time"*/
 	// You neet to add with
 	// go get github.com/fenilfadadu/CS628-assn1/userlib
 	"github.com/fenilfadadu/CS628-assn1/userlib"
@@ -94,22 +93,22 @@ type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
  *  FileMetadata map[string]MetaData
  *}*/
 type MetaData struct {
-	Owner            string
-	LastEditBy       string            // hash(LastEditByUserName)
-	LastEditTime     time.Time         // hash(LastEditByUserName)
+	Owner      string
+	LastEditBy string // hash(LastEditByUserName)
+	/*LastEditTime     time.Time         // hash(LastEditByUserName)*/
 	FilenameMap      map[string]string // Map from hash(username) to encrypted filename for that user (encrypted with symmetric key of that user)
 	GenesisBlock     string            // HashValue(Owner + FilenameMap[Owner] + uuid nonce)
 	GenesisUUIDNonce string
 	LastUUIDNonce    string
-	LastBlock        string    // HashValue(LastEditBy + FilenameMap[LastEditBy] + uuid nonce)
-	HMAC             hash.Hash // HMAC(key = FileSharingKey, Data = Owner, LastEditBy, LastEditTime, GenesisBlock, GenesisBlockNonce, LastUUIDNonce, LastBlock)
+	LastBlock        string // HashValue(LastEditBy + FilenameMap[LastEditBy] + uuid nonce)
+	HMAC             []byte // HMAC(key = FileSharingKey, Data = Owner, LastEditBy, LastEditTime, GenesisBlock, GenesisBlockNonce, LastUUIDNonce, LastBlock)
 }
 
 type Block struct {
 	Owner         string
 	Content       []byte
 	PrevBlockHash string
-	HMAC          hash.Hash
+	HMAC          []byte
 }
 type temporaryBlock struct {
 	Owner         string
@@ -196,20 +195,37 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 // fail with an error if the user/password is invalid, or if the user
 // data was corrupted, or if the user can't be found.
 
+/*
+*		TO-DO: check for encryption, make all the errors same
+ */
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	UserDataString := hex.EncodeToString(userlib.Argon2Key([]byte("UserDataString"), nil, uint32(userlib.HashSize)))
+	// val contains the byte slice for the whole userDataMap
 	val, ok := userlib.DatastoreGet(UserDataString)
 	//check if the hashedusername exists
 	if !ok {
-		return nil, nil
+		err := errors.New("[GetUser]: UserDataString wasn't indexed in Datastore.")
+		return nil, err
 	}
+	var userDataMap map[string]User
 	var userdata User
-	json.Unmarshal(val, &userdata)
-	authPass := userlib.Argon2Key([]byte(password), nil, 2*uint32(userlib.HashSize))
-	//check if the password is correct
-	if userlib.Equal(userdata.SymmetricKey, authPass) {
-		return nil, nil
+	json.Unmarshal(val, &userDataMap)
+
+	//check if the user exists in map
+	hashedUsername := hex.EncodeToString(userlib.Argon2Key([]byte(username), nil, uint32(userlib.HashSize)))
+	userdata, ok = userDataMap[hashedUsername]
+	if !ok {
+		err := errors.New("[GetUser]: User not present in Datastore.")
+		return nil, err
 	}
+
+	//check if the password is correct
+	authPass := userlib.Argon2Key([]byte(password), nil, 2*uint32(userlib.HashSize))
+	if userlib.Equal(userdata.SymmetricKey, authPass) != true {
+		err := errors.New("[GetUser]: User's password doesn't match.")
+		return nil, err
+	}
+
 	//calculate newHMAC of fetched User
 	macInit := userlib.NewHMAC(userdata.SymmetricKey)
 
@@ -224,16 +240,16 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	if err != nil {
 		return nil, err
 	}
-	//check if HMAC is same(not tempered)
-	if userlib.Equal(macInit.Sum(nil), userdata.HMAC) {
-		return nil, nil
+	//check if HMAC is same(not tampered)
+	if userlib.Equal(macInit.Sum(nil), userdata.HMAC) != true {
+		err := errors.New("[GetUser]: User's data has been tampered.")
+		return nil, err
 	}
 
 	return &userdata, nil
 }
 
 // This stores a file in the datastore.
-//
 // The name of the file should NOT be revealed to the datastore!
 func (userdata *User) StoreFile(filename string, data []byte) {
 	var block Block
@@ -259,11 +275,11 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	temp.Owner = userdata.Username
 	temp.PrevBlockHash = ""
 
-	bytes, err := json.Marshal(temp)
-	if err != nil {
-
-	}
-	block.HMAC = userlib.NewHMAC(bytes)
+	/*  bytes, err := json.Marshal(temp)
+	 *  if err != nil {
+	 *
+	 *  }*/
+	/*block.HMAC = userlib.NewHMAC(bytes)*/
 }
 
 // This adds on to an existing file.

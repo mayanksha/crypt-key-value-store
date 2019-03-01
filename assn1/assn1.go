@@ -564,9 +564,9 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 // sharingRecord to serialized/deserialize in the data store.
 type sharingRecord struct {
 	MetadataIndex string
+	FileKey       FileSharingKey
 	UUIDnonce     uuid.UUID
 	RSAsignature  []byte
-	FileKey       FileSharingKey
 }
 
 // This creates a sharing record, which is a key pointing to something
@@ -603,7 +603,11 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 	sharemsg.MetadataIndex = Argon2Hash(metadataIndexHashed)
 	sharemsg.FileKey = userdata.FileKeys[filename]
 	sharemsg.UUIDnonce = uuid.New() //to prevent replay attack
-	sharemsg.RSAsignature = nil     //TODO : signature with UUIDnonce
+
+	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString(sharemsg.FileKey) + hex.EncodeToString(sharemsg.UUIDnonce) //CHECK: TODO see UUIDnonce convert to string?
+	sharingRecordHASH := Argon2Hash(sharingRecordSUM)                                                                          //take  hash  for signature
+
+	sharemsg.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH)) //TODO : signature with UUIDnonce
 	randUUID := uuid.New().String()
 	shareid := Argon2Hash(randUUID)
 
@@ -632,6 +636,51 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	// Get the Pubkey of sender
 	// Use the sender's pubkey to verify signature
 	// User Filekeys update
+	ciphertext, ok := userlib.DatastoreGet(msgid)
+	//get ciphertext assosciated with msgid
+	if !ok {
+		return errors.New("msgid is wrong")
+	}
+	//decrypt with user's priv key
+	decrypted, err := userlib.RSADecrypt(&userdata.PrivateKey, ciphertext, nil)
+	if err != nil {
+		return err
+	}
+	var sharemsg sharingRecord
+	json.Unmarshal(decrypted, &sharemsg)
+	//pubkey of sender  from keyStore
+	Sekey, ok := userlib.KeystoreGet(sender)
+	if !ok {
+		return errors.New("[ShareFile] : " + sender + "not found")
+	}
+	//TODO convert the required in sharingRecord to  []byte
+
+	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString(sharemsg.FileKey) + hex.EncodeToString(sharemsg.UUIDnonce) //CHECK: TODO see UUIDnonce convert to string?
+	sharingRecordHASH := Argon2Hash(sharingRecordSUM)                                                                          //take  hash  for signature
+
+	//verify signature TODO update 'nil' below to msg
+	err = userlib.RSAVerify(&Sekey, []byte(sharingRecordHASH), sharemsg.RSAsignature)
+
+	if err != nil {
+		return errors.New("RSAsignature is Invalid")
+	}
+	//update users.filekey
+	userdata.FileKeys[filename] = FileSharingKey(sharemsg.FileKey)
+	//[NEW] update HMAC in userdata
+	macInit := userlib.NewHMAC(userdata.SymmetricKey)
+	macInit.Write([]byte(userdata.Username))
+	var bytes []byte
+	bytes, err = json.Marshal(userdata.PrivateKey)
+	if err != nil {
+		return err
+	}
+	macInit.Write(bytes)
+	bytes, err = json.Marshal(userdata.FileKeys)
+	if err != nil {
+		return err
+	}
+	userdata.HMAC = macInit.Sum(nil) //updated NEW HMAC in userdata
+
 	return nil
 }
 
@@ -649,7 +698,7 @@ func (userdata *User) RevokeFile(filename string) (err error) {
  *    }
  *    var block Block
  *    json.Unmarshal(val, &block)
- *    calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
+ *    calcBlocHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
  *
  *    if err != nil {
  *      return err

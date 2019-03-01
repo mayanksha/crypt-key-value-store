@@ -565,7 +565,30 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 	var metadata MetaData
 	json.Unmarshal(val, &metadata)
 
-	return
+	//get recipient's pub key
+	Repubkey, ok := userlib.KeystoreGet(recipient)
+	if !ok {
+		return "", errors.New("[ShareFile] : " + recipient + "not found")
+	}
+	var sharemsg sharingRecord
+
+	sharemsg.MetadataIndex = Argon2Hash(metadata)
+	sharemsg.FileKey = userdata.FileKeys[filename]
+
+	randUUID := uuid.New().String()
+	shareid := Argon2Hash(randUUID)
+
+	bytes, err := json.Marshal(metadata.FilenameMap)
+	if err != nil {
+		return nil, err
+	}
+	ciphertext, err := userlib.RSAEncrypt(Repubkey, bytes)
+	if err != nil {
+		return "", errors.New("error in RSA")
+	}
+	userlib.DatastoreSet(shareid, ciphertext)
+
+	return shareid, err
 }
 
 // Note recipient's filename can be different from the sender's filename.
@@ -574,6 +597,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 // it is authentically from the sender.
 func (userdata *User) ReceiveFile(filename string, sender string,
 	msgid string) error {
+
 	return nil
 }
 

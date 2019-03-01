@@ -93,6 +93,25 @@ func TestStorage(t *testing.T) {
 		t.Error(err)
 	}
 	t.Log(string(v2))
+
+	v3 = []byte("Oh, this is a new FILE!!!!")
+	u.StoreFile("file1", v3)
+	v3, err = u.LoadFile("file1")
+	if err != nil {
+		t.Error(err)
+	}
+	t.Log(string(v3))
+
+	err = u.AppendFile("file1", v2)
+	if err != nil {
+		t.Error(err)
+	}
+
+	v2, err = u.LoadFile("file1")
+	if err != nil {
+		t.Error(err)
+	}
+	t.Log(string(v2))
 }
 
 /*func TestShare(t *testing.T) {

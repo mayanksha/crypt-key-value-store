@@ -4,8 +4,9 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
-	"fmt"
-	/*"time"*/
+	// "fmt"
+	// "time"
+
 	// You neet to add with
 	// go get github.com/fenilfadadu/CS628-assn1/userlib
 	"github.com/fenilfadadu/CS628-assn1/userlib"
@@ -58,8 +59,8 @@ func MetadataHMAC(metadata MetaData, SymmetricKey []byte) ([]byte, error) {
 }
 
 func BlockHMAC(block Block, SymmetricKey []byte) ([]byte, error) {
-	fmt.Println("Inside BlockHMAC: prev: " + block.PrevBlockHash)
-	fmt.Println(string(block.Content))
+	//fmt.Println("Inside BlockHMAC: prev: " + block.PrevBlockHash)
+	//fmt.Println(string(block.Content))
 	macInit := userlib.NewHMAC(SymmetricKey)
 
 	macInit.Write([]byte(block.Owner))
@@ -128,11 +129,6 @@ type User struct {
 	HMAC         []byte                    // H(username + SymmetricKey + PrivateKey + FileKeys)
 }
 type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
-/*type Data struct {
- *  UserData     map[string]User
- *  FileBlocks   map[string]Block
- *  FileMetadata map[string]MetaData
- *}*/
 type MetaData struct {
 	Owner            string
 	LastEditBy       string            // hash(LastEditByUserName)
@@ -291,7 +287,8 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 // This stores a file in the datastore.
 // The name of the file should NOT be revealed to the datastore!
 func (userdata *User) StoreFile(filename string, data []byte) {
-	fmt.Println("[StoreFile]")
+	//fmt.Println("[StoreFile]")
+
 	/* TODO: Store encrypted filenames in FilenameMap (is it even useful?)
 	* Perform Full Encryption
 	 */
@@ -300,20 +297,21 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	// hash(metaDataString + username + randUUID + filename)
 	// The MetaData stores information about the blocks of file
 
-	metadataIndex := metaDataString + userdata.Username + filename
+	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
 	metadataIndexHashed := Argon2Hash(metadataIndex)
 	_, ok := userlib.DatastoreGet(metadataIndexHashed)
 
-	// For first store, file must not be present
-	if ok {
-		errString := "[StoreFile] [Argon2Key MetadataHash Collision]: " + metadataIndex + " Collided"
-		panic(errString)
-	}
-
-	// Random UUID in string form
 	randUUID := uuid.New().String()
 	fileKey := Argon2Hash(randUUID)
 
+	// For first store, file may be present, and if it is then replace that file.
+	// Change that file's key inside userdata.FileKeys
+	// Also Completely change its metadata
+	if ok {
+		userlib.DatastoreSet(metadataIndexHashed, nil)
+	}
+
+	// Random UUID in string form
 	// Before anything else, update the User struct with new fileKey
 	userdata.FileKeys[filename] = FileSharingKey(fileKey)
 
@@ -335,7 +333,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	metadata.LastUUIDNonce = metadata.GenesisUUIDNonce
 	metadata.LastBlock = metadata.GenesisBlock
 
-	fmt.Println(metadata.LastBlock)
+	//fmt.Println(metadata.LastBlock)
 	// Get the HMAC of the current metadata structure
 	hmac, err := MetadataHMAC(metadata, userdata.SymmetricKey)
 	if err != nil {
@@ -387,8 +385,8 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 // metadata you need.
 
 func (userdata *User) AppendFile(filename string, data []byte) (err error) {
-	fmt.Println("AppendFile called: " + filename + string(data))
-	metadataIndex := metaDataString + userdata.Username + filename
+	//fmt.Println("AppendFile called: " + filename + string(data))
+	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
 	metadataIndexHashed := Argon2Hash(metadataIndex)
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
 
@@ -404,8 +402,8 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	var metadata MetaData
 	json.Unmarshal(val, &metadata)
 
-	fmt.Println(metadata.LastUUIDNonce)
-	fmt.Println(metadata.LastBlock)
+	//fmt.Println(metadata.LastUUIDNonce)
+	//fmt.Println(metadata.LastBlock)
 
 	//check the HMAC
 	calcMetadataHMAC, err := MetadataHMAC(metadata, userdata.SymmetricKey)
@@ -454,8 +452,8 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	}
 	block.HMAC = hmac
 
-	fmt.Printf("Block HMAC = %v\n", block.HMAC)
-	fmt.Println(block.HMAC)
+	//fmt.Printf("Block HMAC = %v\n", block.HMAC)
+	//fmt.Println(block.HMAC)
 	bytes, err = json.Marshal(block)
 	if err != nil {
 		return err
@@ -465,39 +463,11 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	return nil
 }
 
-/*func verifyFileIntegrity(userdata User, metadata MetaData) error {
- *  for true {
- *    val, ok := userlib.DatastoreGet(metadata.LastBlock)
- *    // check if block is present or not
- *    if !ok {
- *      return errors.New("[verifyFileIntegrity]: Failed")
- *    }
- *    var block Block
- *    json.Unmarshal(val, &block)
- *    calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
- *
- *    if err != nil {
- *      return err
- *    }
- *
- *    //check block  HMAC
- *    if userlib.Equal(calcBlockHMAC, block.HMAC) != true {
- *      return errors.New("[verifyFileIntegrity]: Failed")
- *    }
- *    prevBlockHash := block.PrevBlockHash
- *    if prevBlockHash == "" {
- *      break
- *    }
- *  }
- *  return nil
- *}*/
-
 // This loads a file from the Datastore.
-//
 // It should give an error if the file is corrupted in any way.
 func (userdata *User) LoadFile(filename string) (data []byte, err error) {
-	fmt.Println("LoadFile called: " + filename)
-	metadataIndex := metaDataString + userdata.Username + filename
+	//fmt.Println("LoadFile called: " + filename)
+	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
 	metadataIndexHashed := Argon2Hash(metadataIndex)
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
 
@@ -526,7 +496,7 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	var temp [][]byte
 	prevBlockHash := metadata.LastBlock
 	for prevBlockHash != "" {
-		fmt.Printf("Metadata LastBlock = %v\n", prevBlockHash)
+		//fmt.Printf("Metadata LastBlock = %v\n", prevBlockHash)
 		val, ok := userlib.DatastoreGet(prevBlockHash)
 		// check if block is present or not
 		if !ok {
@@ -541,15 +511,15 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		}
 
 		//check block  HMAC
-		fmt.Println(calcBlockHMAC)
-		fmt.Println(block.HMAC)
+		//fmt.Println(calcBlockHMAC)
+		//fmt.Println(block.HMAC)
 		if userlib.Equal(calcBlockHMAC, block.HMAC) != true {
 			return nil, errors.New("[LoadFile]: Failed HMAC unequal")
 		}
 
-		fmt.Println(block.Owner)
-		fmt.Println(block.PrevBlockHash)
-		fmt.Println(string(block.Content))
+		//fmt.Println(block.Owner)
+		//fmt.Println(block.PrevBlockHash)
+		//fmt.Println(string(block.Content))
 		temp = append(temp, block.Content)
 		prevBlockHash = block.PrevBlockHash
 	}
@@ -558,7 +528,7 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		// Below is a variadic function
 		// https://stackoverflow.com/questions/16248241/concatenate-two-slices-in-go
 		data = append(data, temp[i]...)
-		fmt.Println(string(data))
+		//fmt.Println(string(data))
 	}
 
 	return data, nil
@@ -598,3 +568,30 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 func (userdata *User) RevokeFile(filename string) (err error) {
 	return
 }
+
+/*func verifyFileIntegrity(userdata User, metadata MetaData) error {
+ *  for true {
+ *    val, ok := userlib.DatastoreGet(metadata.LastBlock)
+ *    // check if block is present or not
+ *    if !ok {
+ *      return errors.New("[verifyFileIntegrity]: Failed")
+ *    }
+ *    var block Block
+ *    json.Unmarshal(val, &block)
+ *    calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
+ *
+ *    if err != nil {
+ *      return err
+ *    }
+ *
+ *    //check block  HMAC
+ *    if userlib.Equal(calcBlockHMAC, block.HMAC) != true {
+ *      return errors.New("[verifyFileIntegrity]: Failed")
+ *    }
+ *    prevBlockHash := block.PrevBlockHash
+ *    if prevBlockHash == "" {
+ *      break
+ *    }
+ *  }
+ *  return nil
+ *}*/

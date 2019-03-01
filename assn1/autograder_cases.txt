@@ -1,0 +1,78 @@
+Score : 50.9087888852
+Max Score: 100.0
+Test Name: InitError_ 
+Score : 1 Max Score: 1
+Test Name: Storage 
+Score : 1 Max Score: 1
+Test Name: ShareMultipleUsers_ 
+Score : 0 Max Score: 1
+Test Name: Share 
+Score : 0 Max Score: 1
+Test Name: ShuffleDataAppend_ 
+Score : 1 Max Score: 1
+Test Name: Init 
+Score : 1 Max Score: 1
+Test Name: DupData_ 
+Score : 1 Max Score: 1
+Test Name: ShareError_ 
+Score : 0 Max Score: 1
+Test Name: Init_ 
+Score : 1 Max Score: 1
+Test Name: Share_ 
+Score : 0 Max Score: 1
+Test Name: SingleUserLoad_ 
+Score : 1 Max Score: 1
+Test Name: EfficientAppendLessHarsh_ 
+Score : 1 Max Score: 1
+Test Name: SingleUserLoadAppendError_ 
+Score : 1 Max Score: 1
+Test Name: ShuffleData_ 
+Score : 1 Max Score: 1
+Test Name: Sanity Check 
+Score : 1 Max Score: 1
+Test Name: DupDataAppend_ 
+Score : 1 Max Score: 1
+Test Name: DataEncrypted_ 
+Score : 0 Max Score: 1
+Test Name: MutateShare_ 
+Score : 1 Max Score: 1
+Test Name: ShareUsesSign_ 
+Score : 0 Max Score: 1
+Test Name: DupShare_ 
+Score : 0 Max Score: 1
+Test Name: MutateUser_ 
+Score : 1 Max Score: 1
+Test Name: MutateData_ 
+Score : 1 Max Score: 1
+Test Name: MutateDataAppend_ 
+Score : 1 Max Score: 1
+Test Name: SingleUserAppend_ 
+Score : 1 Max Score: 1
+Test Name: IVReuse_ 
+Score : 1 Max Score: 1
+Test Name: SeperateMacKeys_ 
+Score : 1 Max Score: 1
+Test Name: MutateRevoke_ 
+Score : 1 Max Score: 1
+Test Name: EncryptionAndMacKeysDifferent_ 
+Score : 1 Max Score: 1
+Test Name: EfficientAppend_ 
+Score : 1 Max Score: 1
+Test Name: KeysNotPlaintext_ 
+Score : 1 Max Score: 1
+Test Name: SingleUserMultipleInstances_ 
+Score : 1 Max Score: 1
+Test Name: RevokeError_ 
+Score : 0 Max Score: 1
+Test Name: Timeout Check 
+Score : 1 Max Score: 1
+Test Name: ShuffleShare_ 
+Score : 0 Max Score: 1
+Test Name: ShuffleRevoke_ 
+Score : 0 Max Score: 1
+Test Name: Late Penalty 
+Score : 1 Max Score: 1
+Test Name: DupRevoke_ 
+Score : 0 Max Score: 1
+Test Name: Revoke_ 
+Score : 1 Max Score: 1

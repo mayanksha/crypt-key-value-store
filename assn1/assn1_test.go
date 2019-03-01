@@ -78,9 +78,20 @@ func TestStorage(t *testing.T) {
 		t.Error("Downloaded file is not the same", v, v2)
 	}
 	v3 := []byte("<3 November Rain!")
-	u.AppendFile("file1", v3)
 
-	v2, err2 = u.LoadFile("file1")
+	/*err = u.AppendFile("file2", v3)
+	 *if err != nil {
+	 *  t.Error(err)
+	 *}*/
+	err = u.AppendFile("file1", v3)
+	if err != nil {
+		t.Error(err)
+	}
+
+	v2, err = u.LoadFile("file1")
+	if err != nil {
+		t.Error(err)
+	}
 	t.Log(string(v2))
 }
 

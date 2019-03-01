@@ -627,7 +627,11 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 // it is authentically from the sender
 func (userdata *User) ReceiveFile(filename string, sender string,
 	msgid string) error {
-
+	// Get(msgid)
+	// Use the private key to decrypt the sharemsg struct
+	// Get the Pubkey of sender
+	// Use the sender's pubkey to verify signature
+	// User Filekeys update
 	return nil
 }
 

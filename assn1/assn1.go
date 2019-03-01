@@ -4,7 +4,7 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
-	/*"fmt"*/
+	"fmt"
 	/*"time"*/
 	// You neet to add with
 	// go get github.com/fenilfadadu/CS628-assn1/userlib
@@ -234,7 +234,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 // data was corrupted, or if the user can't be found.
 
 /*
-*		TO-DO: check for encryption, make all the errors same
+*		TODO: check for encryption, make all the errors same
  */
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	// val contains the byte slice for the whole userDataMap
@@ -289,7 +289,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 // This stores a file in the datastore.
 // The name of the file should NOT be revealed to the datastore!
 func (userdata *User) StoreFile(filename string, data []byte) {
-	/* TO-DO: Store encrypted filenames in FilenameMap (is it even useful?)
+	/* TODO: Store encrypted filenames in FilenameMap (is it even useful?)
 	* Perform Full Encryption
 	 */
 
@@ -305,7 +305,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	if ok {
 		errString := "[StoreFile] [Argon2Key MetadataHash Collision]: " + metadataIndex + " Collided"
 		panic(errString)
-		return
 	}
 
 	// Random UUID in string form
@@ -337,7 +336,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	hmac, err := MetadataHMAC(metadata, userdata.SymmetricKey)
 	if err != nil {
 		panic(err)
-		return
 	}
 	metadata.HMAC = hmac
 
@@ -345,7 +343,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	bytes, err := json.Marshal(metadata)
 	if err != nil {
 		panic(err)
-		return
 	}
 	userlib.DatastoreSet(metadataIndexHashed, bytes)
 
@@ -355,10 +352,9 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	if ok {
 		errString := "[StoreFile] [Argon2Key BlockHash Collision]: " + blockIndex + " Collided"
 		panic(errString)
-		return
 	}
 
-	// TO-DO Encrypt the below struct
+	// TODO Encrypt the below struct
 	var block Block
 	block.Owner = metadata.Owner
 	block.Content = data
@@ -368,14 +364,12 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	hmac, err = BlockHMAC(block, userdata.SymmetricKey)
 	if err != nil {
 		panic(err)
-		return
 	}
 	block.HMAC = hmac
 
 	bytes, err = json.Marshal(block)
 	if err != nil {
 		panic(err)
-		return
 	}
 	userlib.DatastoreSet(metadata.GenesisBlock, bytes)
 	return
@@ -388,8 +382,105 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 // metadata you need.
 
 func (userdata *User) AppendFile(filename string, data []byte) (err error) {
-	return
+	metadataIndex := metaDataString + userdata.Username + filename
+	metadataIndexHashed := Argon2Hash(metadataIndex)
+	val, ok := userlib.DatastoreGet(metadataIndexHashed)
+
+	if !ok {
+		return errors.New("[AppendFile]: File not Found: " + filename)
+	}
+
+	//Decrypt everything you encrypt
+	//get file key
+	//fileKey := userdata.FileKeys[filename]
+
+	//decrypt the file-TODO
+	var metadata MetaData
+	json.Unmarshal(val, &metadata)
+
+	fmt.Println(metadata.LastUUIDNonce)
+	fmt.Println(metadata.LastBlock)
+
+	//check the HMAC
+	calcMetadataHMAC, err := MetadataHMAC(metadata, userdata.SymmetricKey)
+
+	if userlib.Equal(calcMetadataHMAC, metadata.HMAC) != true {
+		return errors.New("[AppendFile]: Something Wrong with MetaDataHMAC")
+	}
+
+	var block Block
+	block.Owner = metadata.Owner
+	block.Content = data
+	block.PrevBlockHash = metadata.LastBlock
+
+	// Get the HMAC of the current block structure
+	hmac, err := BlockHMAC(block, userdata.SymmetricKey)
+	if err != nil {
+		return err
+	}
+	block.HMAC = hmac
+
+	bytes, err := json.Marshal(block)
+	if err != nil {
+		return err
+	}
+	// This is useless and can be removed later when refactoring
+	genesisBlockNumber := 0
+	lastUUIDNonce := uuid.New()
+	blockIndex := fileBlocksString + userdata.Username + lastUUIDNonce.String() + string(genesisBlockNumber) + filename
+	blockIndexHashed := Argon2Hash(blockIndex)
+
+	metadata.LastUUIDNonce = lastUUIDNonce
+	metadata.LastBlock = blockIndexHashed
+	metadata.LastEditBy = Argon2Hash(userdata.Username)
+
+	fmt.Println(metadata.LastUUIDNonce)
+	fmt.Println(metadata.LastBlock)
+	// Update the HMAC of Metadata
+	hmac, err = MetadataHMAC(metadata, userdata.SymmetricKey)
+	if err != nil {
+		panic(err)
+	}
+	metadata.HMAC = hmac
+
+	// Marshal Metadata and update in Datastore
+	bytes, err = json.Marshal(metadata)
+	if err != nil {
+		panic(err)
+	}
+	userlib.DatastoreSet(metadataIndexHashed, bytes)
+
+	// TODO: encryption
+	userlib.DatastoreSet(blockIndexHashed, bytes)
+	return nil
 }
+
+/*func verifyFileIntegrity(userdata User, metadata MetaData) error {
+ *  for true {
+ *    val, ok := userlib.DatastoreGet(metadata.LastBlock)
+ *    // check if block is present or not
+ *    if !ok {
+ *      return errors.New("[verifyFileIntegrity]: Failed")
+ *    }
+ *    var block Block
+ *    json.Unmarshal(val, &block)
+ *    calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
+ *
+ *    if err != nil {
+ *      return err
+ *    }
+ *
+ *    //check block  HMAC
+ *    if userlib.Equal(calcBlockHMAC, block.HMAC) != true {
+ *      return errors.New("[verifyFileIntegrity]: Failed")
+ *    }
+ *    prevBlockHash := block.PrevBlockHash
+ *    if prevBlockHash == "" {
+ *      break
+ *    }
+ *  }
+ *  return nil
+ *}*/
 
 // This loads a file from the Datastore.
 //
@@ -399,12 +490,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	metadataIndexHashed := Argon2Hash(metadataIndex)
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
 
-	// For first store, file must not be present
 	if !ok {
-		errString := "Error 404 : " + filename + "not found"
-		panic(errString)
-		return
+		return nil, errors.New("[LoadFile]: File not Found: " + filename)
 	}
+
 	//Decrypt everything you encrypt
 	//get file key
 	//fileKey := userdata.FileKeys[filename]
@@ -416,33 +505,50 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	//check the HMAC
 	calcMetadataHMAC, err := MetadataHMAC(metadata, userdata.SymmetricKey)
 
-	if !userlib.Equal(calcMetadataHMAC, metadata.HMAC) {
-		errString := "Something Wrong with MetaDataHMAC"
-		panic(errString)
-		return
+	if userlib.Equal(calcMetadataHMAC, metadata.HMAC) != true {
+		return nil, errors.New("[LoadFile]: Something Wrong with MetaDataHMAC")
 	}
 
-	//get the file blocks and TODO- decrypt them
-	val, ok = userlib.DatastoreGet(metadata.GenesisBlock)
-	// check if block is present or not
-	if !ok {
-		errString := "Error 404 :  " + "Not Found"
-		panic(errString)
-		return
+	// Traverses all block until LastBlock and checks their integrity
+	/*err = verifyFileIntegrity(*userdata, metadata)*/
+
+	var temp [][]byte
+	for true {
+		val, ok := userlib.DatastoreGet(metadata.LastBlock)
+		// check if block is present or not
+		if !ok {
+			return nil, errors.New("[LoadFile]: Failed")
+		}
+		var block Block
+		json.Unmarshal(val, &block)
+		calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
+
+		if err != nil {
+			return nil, err
+		}
+
+		//check block  HMAC
+		if userlib.Equal(calcBlockHMAC, block.HMAC) != true {
+			return nil, errors.New("[LoadFile]: Failed")
+		}
+
+		fmt.Println(block.Owner)
+		fmt.Println(block.PrevBlockHash)
+		fmt.Println(block.Content)
+		temp = append(temp, block.Content)
+		prevBlockHash := block.PrevBlockHash
+		if prevBlockHash == "" {
+			break
+		}
+	}
+	// Reverse iterate over temp to get data in correct order
+	for i := len(temp) - 1; i >= 0; i-- {
+		// Below is a variadic function
+		// https://stackoverflow.com/questions/16248241/concatenate-two-slices-in-go
+		data = append(data, temp[i]...)
 	}
 
-	var block Block
-	json.Unmarshal(val, &block)
-	calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
-
-	//check block  HMAC
-	if !userlib.Equal(calcBlockHMAC, block.HMAC) {
-		errString := "Something Wrong with BlockHMAC"
-		panic(errString)
-	}
-
-	//TODO	//traverse all block until LastBlock and check their integrity
-	return
+	return data, nil
 }
 
 // You may want to define what you actually want to pass as a

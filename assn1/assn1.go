@@ -563,6 +563,8 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 // You may want to define what you actually want to pass as a
 // sharingRecord to serialized/deserialize in the data store.
 type sharingRecord struct {
+	MetadataIndex string
+	FileKey       []byte
 }
 
 // This creates a sharing record, which is a key pointing to something
@@ -578,6 +580,17 @@ type sharingRecord struct {
 
 func (userdata *User) ShareFile(filename string, recipient string) (
 	msgid string, err error) {
+	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
+	metadataIndexHashed := Argon2Hash(metadataIndex)
+	val, ok := userlib.DatastoreGet(metadataIndexHashed)
+	if !ok {
+		return "", errors.New("[ShareFile] : " + filename + "not found")
+	}
+	//TODO Decrypt the structures
+
+	var metadata MetaData
+	json.Unmarshal(val, &metadata)
+
 	return
 }
 

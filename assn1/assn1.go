@@ -564,7 +564,9 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 // sharingRecord to serialized/deserialize in the data store.
 type sharingRecord struct {
 	MetadataIndex string
-	FileKey       []byte
+	UUIDnonce     uuid.UUID
+	RSAsignature  []byte
+	FileKey       FileSharingKey
 }
 
 // This creates a sharing record, which is a key pointing to something
@@ -592,27 +594,29 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 	json.Unmarshal(val, &metadata)
 
 	//get recipient's pub key
-	Repubkey, ok := userlib.KeystoreGet(recipient)
+	Rekey, ok := userlib.KeystoreGet(recipient)
 	if !ok {
 		return "", errors.New("[ShareFile] : " + recipient + "not found")
 	}
 	var sharemsg sharingRecord
 
-	sharemsg.MetadataIndex = Argon2Hash(metadata)
+	sharemsg.MetadataIndex = Argon2Hash(metadataIndexHashed)
 	sharemsg.FileKey = userdata.FileKeys[filename]
-
+	sharemsg.UUIDnonce = uuid.New() //to prevent replay attack
+	sharemsg.RSAsignature = nil     //TODO : signature with UUIDnonce
 	randUUID := uuid.New().String()
 	shareid := Argon2Hash(randUUID)
 
-	bytes, err := json.Marshal(metadata.FilenameMap)
+	bytes, err := json.Marshal(sharemsg) //
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	ciphertext, err := userlib.RSAEncrypt(Repubkey, bytes)
+
+	ciphertext, err := userlib.RSAEncrypt(&Rekey, bytes, nil) // TODO TAG in RSAENCRYPT
 	if err != nil {
 		return "", errors.New("error in RSA")
 	}
-	userlib.DatastoreSet(shareid, ciphertext)
+	userlib.DatastoreSet(shareid, ciphertext) //store the encrypted sharemsg []byte in Datastore
 
 	return shareid, err
 }
@@ -620,7 +624,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 // Note recipient's filename can be different from the sender's filename.
 // The recipient should not be able to discover the sender's view on
 // what the filename even is!  However, the recipient must ensure that
-// it is authentically from the sender.
+// it is authentically from the sender
 func (userdata *User) ReceiveFile(filename string, sender string,
 	msgid string) error {
 

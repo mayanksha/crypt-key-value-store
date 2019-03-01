@@ -146,12 +146,6 @@ type Block struct {
 	PrevBlockHash string
 	HMAC          []byte
 }
-type temporaryBlock struct { //is it of any use?
-	Owner         string
-	Content       []byte
-	PrevBlockHash string
-	HMAC          []byte
-}
 
 // This creates a user.  It will only be called once for a user
 // (unless the keystore and datastore are cleared during testing purposes)
@@ -289,9 +283,10 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 func (userdata *User) StoreFile(filename string, data []byte) {
 	//fmt.Println("[StoreFile]")
 
-	/* TODO: Store encrypted filenames in FilenameMap (is it even useful?)
-	* Perform Full Encryption
-	 */
+	/*
+	 * TODO: Store encrypted filenames in FilenameMap (is it even useful?)
+	 * Perform Full Encryption
+	 **/
 
 	// The file's MetaData is indexed into datastore by the string
 	// hash(metaDataString + username + randUUID + filename)
@@ -299,32 +294,63 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 
 	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
 	metadataIndexHashed := Argon2Hash(metadataIndex)
-	_, ok := userlib.DatastoreGet(metadataIndexHashed)
+	val, ok := userlib.DatastoreGet(metadataIndexHashed)
 
-	randUUID := uuid.New().String()
-	fileKey := Argon2Hash(randUUID)
-
-	// For first store, file may be present, and if it is then replace that file.
-	// Change that file's key inside userdata.FileKeys
-	// Also Completely change its metadata
+	/*
+	 *  For first store, just store the file.
+	 *  For second store on the same file, preserve its file key so that
+	 *  sharing can remain active. Also, update the new Owner of the Metadata
+	 *	and update the HMAC too.
+	 **/
+	var oldMetadata MetaData
+	var metadata MetaData
+	var fileKey FileSharingKey
 	if ok {
-		userlib.DatastoreSet(metadataIndexHashed, nil)
+		json.Unmarshal(val, &oldMetadata)
+
+		// Check the HMAC
+		calcMetadataHMAC, err := MetadataHMAC(oldMetadata, []byte(userdata.FileKeys[filename]))
+
+		// If err, then completely reset that file's oldMetadata
+		if err != nil {
+			userlib.DatastoreSet(metadataIndexHashed, nil)
+			return
+		}
+		if userlib.Equal(calcMetadataHMAC, oldMetadata.HMAC) != true {
+			panic(errors.New("[StoreFile]: Someone tried to store a file of which he wasn't the owner."))
+		}
+
+		// TODO: Encryption with below key
+		fileKey = userdata.FileKeys[filename]
+
+		// Set new Owner
+		metadata.Owner = userdata.Username
+		hashedUsername := Argon2Hash(userdata.Username)
+		metadata.LastEditBy = hashedUsername
+		/*
+		 *  TODO: FilenameMap isn't updated anywhere
+		 **/
+		metadata.FilenameMap = oldMetadata.FilenameMap
+
+	} else {
+		randUUID := uuid.New().String()
+		fileKey = FileSharingKey(Argon2Hash(randUUID))
+
+		// Random UUID in string form
+		// Before anything else, update the User struct with new fileKey
+		userdata.FileKeys[filename] = FileSharingKey(fileKey)
+
+		hashedUsername := Argon2Hash(userdata.Username)
+
+		// Populate the file metadata
+		metadata.Owner = userdata.Username
+		metadata.LastEditBy = hashedUsername
+		metadata.FilenameMap = make(map[string][]byte)
+		metadata.FilenameMap[hashedUsername] = []byte(Argon2Hash(filename))
 	}
 
-	// Random UUID in string form
-	// Before anything else, update the User struct with new fileKey
-	userdata.FileKeys[filename] = FileSharingKey(fileKey)
-
-	hashedUsername := Argon2Hash(userdata.Username)
-
-	// Populate the file metadata
-	var metadata MetaData
-	metadata.Owner = userdata.Username
-	metadata.LastEditBy = hashedUsername
-	metadata.FilenameMap = make(map[string][]byte)
-	metadata.FilenameMap[hashedUsername] = []byte(Argon2Hash(filename))
+	// For a new file, generate a new uuid
 	metadata.GenesisUUIDNonce = uuid.New()
-
 	genesisBlockNumber := 0
 	blockIndex := fileBlocksString + userdata.Username + metadata.GenesisUUIDNonce.String() + string(genesisBlockNumber) + filename
 	blockIndexHashed := Argon2Hash(blockIndex)
@@ -335,7 +361,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 
 	//fmt.Println(metadata.LastBlock)
 	// Get the HMAC of the current metadata structure
-	hmac, err := MetadataHMAC(metadata, userdata.SymmetricKey)
+	hmac, err := MetadataHMAC(metadata, []byte(userdata.FileKeys[filename]))
 	if err != nil {
 		panic(err)
 	}
@@ -406,7 +432,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	//fmt.Println(metadata.LastBlock)
 
 	//check the HMAC
-	calcMetadataHMAC, err := MetadataHMAC(metadata, userdata.SymmetricKey)
+	calcMetadataHMAC, err := MetadataHMAC(metadata, []byte(userdata.FileKeys[filename]))
 
 	if userlib.Equal(calcMetadataHMAC, metadata.HMAC) != true {
 		return errors.New("[AppendFile]: Something Wrong with MetaDataHMAC")
@@ -427,7 +453,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	metadata.LastEditBy = Argon2Hash(userdata.Username)
 
 	// Update the HMAC of Metadata
-	hmac, err := MetadataHMAC(metadata, userdata.SymmetricKey)
+	hmac, err := MetadataHMAC(metadata, []byte(userdata.FileKeys[filename]))
 	if err != nil {
 		panic(err)
 	}
@@ -484,7 +510,7 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	json.Unmarshal(val, &metadata)
 
 	//check the HMAC
-	calcMetadataHMAC, err := MetadataHMAC(metadata, userdata.SymmetricKey)
+	calcMetadataHMAC, err := MetadataHMAC(metadata, []byte(userdata.FileKeys[filename]))
 
 	if userlib.Equal(calcMetadataHMAC, metadata.HMAC) != true {
 		return nil, errors.New("[LoadFile]: Something Wrong with MetaDataHMAC")

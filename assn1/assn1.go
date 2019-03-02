@@ -69,6 +69,29 @@ func BlockHMAC(block Block, SymmetricKey []byte) ([]byte, error) {
 	return macInit.Sum(nil), nil
 }
 
+func UserHMAC(userdata User) ([]byte, error) {
+	macInit := userlib.NewHMAC(userdata.SymmetricKey)
+
+	macInit.Write([]byte(userdata.Username))
+	var bytes []byte
+	bytes, err := json.Marshal(userdata.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	macInit.Write(bytes)
+	bytes, err = json.Marshal(userdata.FileKeys)
+	if err != nil {
+		return nil, err
+	}
+	macInit.Write(bytes)
+	bytes, err = json.Marshal(userdata.MetadataIndex)
+	if err != nil {
+		return nil, err
+	}
+	macInit.Write(bytes)
+	return macInit.Sum(nil), nil
+}
+
 var fileBlocksString string = Argon2Hash("FileBlocksString")
 var metaDataString string = Argon2Hash("MetaDataString")
 var userDataString string = Argon2Hash("UserDataString")
@@ -122,11 +145,12 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
 *}*/
 type User struct {
 	/*Username need not be encrypted with symmetric key*/
-	Username     string
-	SymmetricKey []byte                    // Argon2(password), given, password has high entropy
-	PrivateKey   userlib.PrivateKey        // Encrypted with the Symmetric Key
-	FileKeys     map[string]FileSharingKey // Indexed by filename to FileSharingKey
-	HMAC         []byte                    // H(username + SymmetricKey + PrivateKey + FileKeys)
+	Username      string
+	SymmetricKey  []byte                    // Argon2(password), given, password has high entropy
+	PrivateKey    userlib.PrivateKey        // Encrypted with the Symmetric Key
+	FileKeys      map[string]FileSharingKey // Indexed by filename to FileSharingKey
+	MetadataIndex map[string]string         // Indexed by filename to file's metadata index
+	HMAC          []byte                    // H(username + SymmetricKey + PrivateKey + FileKeys)
 }
 type FileSharingKey string // HashValue of (Owner.SymmetricKey + uuid as salt)
 type MetaData struct {
@@ -195,25 +219,15 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdata.SymmetricKey = []byte(Argon2PasswordHash(password))
 	userdata.PrivateKey = *key
 	userdata.FileKeys = make(map[string]FileSharingKey)
+	userdata.MetadataIndex = make(map[string]string)
 
-	macInit := userlib.NewHMAC(userdata.SymmetricKey)
-
-	macInit.Write([]byte(userdata.Username))
-	var bytes []byte
-	bytes, err = json.Marshal(userdata.PrivateKey)
+	userdata.HMAC, err = UserHMAC(userdata)
 	if err != nil {
 		return nil, err
 	}
-	macInit.Write(bytes)
-	bytes, err = json.Marshal(userdata.FileKeys)
-	if err != nil {
-		return nil, err
-	}
-	userdata.HMAC = macInit.Sum(nil)
-
 	// To-do CFB encryption using Symmetric Key
 	userDataMap[hashedUsername] = userdata
-	bytes, err = json.Marshal(userDataMap)
+	bytes, err := json.Marshal(userDataMap)
 	if err != nil {
 		return nil, err
 	}
@@ -256,21 +270,12 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	//calculate newHMAC of fetched User
-	macInit := userlib.NewHMAC(userdata.SymmetricKey)
-
-	macInit.Write([]byte(userdata.Username))
-	var bytes []byte
-	bytes, err = json.Marshal(userdata.PrivateKey)
-	if err != nil {
-		return nil, err
-	}
-	macInit.Write(bytes)
-	bytes, err = json.Marshal(userdata.FileKeys)
+	hmac, err := UserHMAC(userdata)
 	if err != nil {
 		return nil, err
 	}
 	//check if HMAC is same(not tampered)
-	if userlib.Equal(macInit.Sum(nil), userdata.HMAC) != true {
+	if userlib.Equal(hmac, userdata.HMAC) != true {
 		err := errors.New("[GetUser]: User's data has been tampered.")
 		return nil, err
 	}
@@ -292,6 +297,10 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	// hash(metaDataString + username + randUUID + filename)
 	// The MetaData stores information about the blocks of file
 
+	var oldMetadata MetaData
+	var metadata MetaData
+	var fileKey FileSharingKey
+
 	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
 	metadataIndexHashed := Argon2Hash(metadataIndex)
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
@@ -302,9 +311,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	 *  sharing can remain active. Also, update the new Owner of the Metadata
 	 *	and update the HMAC too.
 	 **/
-	var oldMetadata MetaData
-	var metadata MetaData
-	var fileKey FileSharingKey
 	if ok {
 		json.Unmarshal(val, &oldMetadata)
 
@@ -367,6 +373,15 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	}
 	metadata.HMAC = hmac
 
+	// Update MetadataIndex inside userdata and also the HMAC too
+	userdata.MetadataIndex[filename] = metadataIndexHashed
+
+	hmac, err = UserHMAC(*userdata)
+	if err != nil {
+		panic(err)
+	}
+	userdata.HMAC = hmac
+
 	// Marshal Metadata and store in Datastore
 	bytes, err := json.Marshal(metadata)
 	if err != nil {
@@ -412,8 +427,8 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 
 func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	//fmt.Println("AppendFile called: " + filename + string(data))
-	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
-	metadataIndexHashed := Argon2Hash(metadataIndex)
+
+	metadataIndexHashed := userdata.MetadataIndex[filename]
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
 
 	if !ok {
@@ -493,8 +508,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 // It should give an error if the file is corrupted in any way.
 func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	//fmt.Println("LoadFile called: " + filename)
-	metadataIndex := metaDataString + userdata.Username + filename + hex.EncodeToString(userdata.SymmetricKey)
-	metadataIndexHashed := Argon2Hash(metadataIndex)
+	metadataIndexHashed := userdata.MetadataIndex[filename]
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
 
 	if !ok {
@@ -604,8 +618,8 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 	sharemsg.FileKey = userdata.FileKeys[filename]
 	sharemsg.UUIDnonce = uuid.New() //to prevent replay attack
 
-	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString(sharemsg.FileKey) + hex.EncodeToString(sharemsg.UUIDnonce) //CHECK: TODO see UUIDnonce convert to string?
-	sharingRecordHASH := Argon2Hash(sharingRecordSUM)                                                                          //take  hash  for signature
+	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String())) //CHECK: TODO see UUIDnonce convert to string?
+	sharingRecordHASH := Argon2Hash(sharingRecordSUM)                                                                                                   //take  hash  for signature
 
 	sharemsg.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH)) //TODO : signature with UUIDnonce
 	randUUID := uuid.New().String()
@@ -653,10 +667,8 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	if !ok {
 		return errors.New("[ShareFile] : " + sender + "not found")
 	}
-	//TODO convert the required in sharingRecord to  []byte
-
-	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString(sharemsg.FileKey) + hex.EncodeToString(sharemsg.UUIDnonce) //CHECK: TODO see UUIDnonce convert to string?
-	sharingRecordHASH := Argon2Hash(sharingRecordSUM)                                                                          //take  hash  for signature
+	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
+	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
 
 	//verify signature TODO update 'nil' below to msg
 	err = userlib.RSAVerify(&Sekey, []byte(sharingRecordHASH), sharemsg.RSAsignature)
@@ -664,9 +676,9 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	if err != nil {
 		return errors.New("RSAsignature is Invalid")
 	}
-	//update users.filekey
+	// update users.filekey
 	userdata.FileKeys[filename] = FileSharingKey(sharemsg.FileKey)
-	//[NEW] update HMAC in userdata
+	// [NEW] update HMAC in userdata
 	macInit := userlib.NewHMAC(userdata.SymmetricKey)
 	macInit.Write([]byte(userdata.Username))
 	var bytes []byte

@@ -4,7 +4,7 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
-	"fmt"
+	// "fmt"
 	// "time"
 
 	// You neet to add with
@@ -63,10 +63,10 @@ func MetadataHMAC(metadata MetaData, SymmetricKey []byte) ([]byte, error) {
 	return macInit.Sum(nil), nil
 }
 
-func BlockHMAC(block Block, SymmetricKey []byte) ([]byte, error) {
+func BlockHMAC(block Block, fileKey []byte) ([]byte, error) {
 	//fmt.Println("Inside BlockHMAC: prev: " + block.PrevBlockHash)
 	//fmt.Println(string(block.Content))
-	macInit := userlib.NewHMAC(SymmetricKey)
+	macInit := userlib.NewHMAC(fileKey)
 
 	macInit.Write([]byte(block.Owner))
 	macInit.Write(block.Content)
@@ -330,7 +330,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 			userlib.DatastoreSet(metadataIndexHashed, nil)
 			return
 		}
-		fmt.Println(prettyPrint(oldMetadata))
+		// fmt.Println(prettyPrint(oldMetadata))
 		if userlib.Equal(calcMetadataHMAC, oldMetadata.HMAC) != true {
 			panic(errors.New("[StoreFile]: Someone tried to store a file of which he wasn't the owner."))
 		}
@@ -430,7 +430,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	block.PrevBlockHash = ""
 
 	// Get the HMAC of the current block structure
-	hmac, err = BlockHMAC(block, userdata.SymmetricKey)
+	hmac, err = BlockHMAC(block, []byte(fileKey))
 	if err != nil {
 		panic(err)
 	}
@@ -515,7 +515,8 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	block.PrevBlockHash = temporaryLastBlock
 
 	// Get the HMAC of the current block structure
-	hmac, err = BlockHMAC(block, userdata.SymmetricKey)
+	fileKey := userdata.FileKeys[filename]
+	hmac, err = BlockHMAC(block, []byte(fileKey))
 	if err != nil {
 		return err
 	}
@@ -565,6 +566,7 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	/*err = verifyFileIntegrity(*userdata, metadata)*/
 
 	var temp [][]byte
+	fileKey := userdata.FileKeys[filename]
 	prevBlockHash := metadata.LastBlock
 	for prevBlockHash != "" {
 		//fmt.Printf("Metadata LastBlock = %v\n", prevBlockHash)
@@ -575,7 +577,7 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		}
 		var block Block
 		json.Unmarshal(val, &block)
-		calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
+		calcBlockHMAC, err := BlockHMAC(block, []byte(fileKey))
 
 		if err != nil {
 			return nil, errors.New("[LoadFile]: Failed")
@@ -626,7 +628,7 @@ type sharingRecord struct {
 // should be able to know the sender.
 
 func (userdata *User) ShareFile(filename string, recipient string) (msgid string, err error) {
-	fmt.Printf("\n[ShareFile]: \n")
+	// fmt.Printf("\n[ShareFile]: \n")
 	if userdata == nil {
 		return
 	}
@@ -659,7 +661,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
 	//take  hash  for signature
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
-	fmt.Println(prettyPrint(sharingRecordHASH))
+	// fmt.Println(prettyPrint(sharingRecordHASH))
 
 	//TODO : signature with UUIDnonce
 	sharemsg.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH))
@@ -667,7 +669,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	randUUID := uuid.New().String()
 	shareid := Argon2Hash(randUUID)
 
-	fmt.Println(prettyPrint(sharemsg))
+	// fmt.Println(prettyPrint(sharemsg))
 	bytes, err := json.Marshal(sharemsg) //
 	if err != nil {
 		return "", err
@@ -682,7 +684,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 // what the filename even is!  However, the recipient must ensure that
 // it is authentically from the sender
 func (userdata *User) ReceiveFile(filename string, sender string, msgid string) error {
-	fmt.Printf("\n[ReceiveFile]: \n")
+	// fmt.Printf("\n[ReceiveFile]: \n")
 
 	if userdata == nil {
 		return errors.New("[ReceiveFile]: nil userdata pointer")
@@ -705,7 +707,7 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	var sharemsg sharingRecord
 	json.Unmarshal(ciphertext, &sharemsg)
 
-	fmt.Println(prettyPrint(sharemsg))
+	// fmt.Println(prettyPrint(sharemsg))
 	// Pubkey of sender  from keyStore
 	Sekey, ok := userlib.KeystoreGet(sender)
 	if !ok {
@@ -713,7 +715,7 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	}
 	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
-	fmt.Println(prettyPrint(sharingRecordHASH))
+	// fmt.Println(prettyPrint(sharingRecordHASH))
 
 	// verify signature TODO: update 'nil' below to msg
 	err := userlib.RSAVerify(&Sekey, []byte(sharingRecordHASH), sharemsg.RSAsignature)
@@ -775,6 +777,7 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	 **/
 	var temp [][]byte
 	var data []byte
+	fileKey := userdata.FileKeys[filename]
 	prevBlockHash := metadata.LastBlock
 	for prevBlockHash != "" {
 		//fmt.Printf("Metadata LastBlock = %v\n", prevBlockHash)
@@ -785,7 +788,7 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 		}
 		var block Block
 		json.Unmarshal(val, &block)
-		calcBlockHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
+		calcBlockHMAC, err := BlockHMAC(block, []byte(fileKey))
 
 		if err != nil {
 			return errors.New("[LoadFile]: Failed")

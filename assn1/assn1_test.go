@@ -58,11 +58,11 @@ func TestStorage(t *testing.T) {
 		t.Error("Failed to reload user", err)
 	}
 	t.Logf("Loaded user: username = %v\nHMAC = %x\n", u.Username, u.HMAC)
-	t.Log(prettyPrint(*u))
+	/*t.Log(prettyPrint(*u))*/
 
 	v := []byte("This is a test")
 	u.StoreFile("file1", v)
-	t.Log(prettyPrint(*u))
+	/*t.Log(prettyPrint(*u))*/
 
 	v2, err2 := u.LoadFile("file1")
 
@@ -92,7 +92,7 @@ func TestStorage(t *testing.T) {
 	v3 = []byte("Oh, this is a new FILE!!!!")
 	u.StoreFile("file1", v3)
 
-	t.Log(prettyPrint(*u))
+	/*t.Log(prettyPrint(*u))*/
 	v3, err = u.LoadFile("file1")
 	if err != nil {
 		t.Error(err)
@@ -113,38 +113,44 @@ func TestStorage(t *testing.T) {
 
 func TestShare(t *testing.T) {
 	file1 := "file1"
-	u, err := GetUser("alice", "foobar")
-	/*t.Log(prettyPrint(*u))*/
+	alice, err := GetUser("alice", "foobar")
+	/*t.Log(prettyPrint(*alice))*/
 	if err != nil {
 		t.Error("Failed to load user", err)
 	}
 	v3 := []byte("Oh, this is a new FILE!!!!")
-	u.StoreFile(file1, v3)
-	u2, err2 := InitUser("bob", "foobar")
+	alice.StoreFile(file1, v3)
+	bob, err2 := InitUser("bob", "foobar")
 	if err2 != nil {
 		t.Error("Failed to initialize bob", err2)
 	}
 
 	var v, v2 []byte
 	var msgid string
-	v, err = u.LoadFile(file1)
+	v, err = alice.LoadFile(file1)
 	if err != nil {
 		t.Error("Failed to download the file from alice", err)
 	}
 
-	t.Logf("User %s, filename %s, data = %s\n", u.Username, file1, v)
-	msgid, err = u.ShareFile("file1", "bob")
+	t.Logf("User %s, filename %s, data = %s\n", alice.Username, file1, v)
+	msgid, err = alice.ShareFile("file1", "bob")
 	t.Log(msgid)
 	if err != nil {
 		t.Error("Failed to share the file", err)
 	}
-	t.Log("This is wonderful! File got shared! :)")
-	err = u2.ReceiveFile("file2", "alice", msgid)
+	err = bob.ReceiveFile("file2", "alice", msgid)
 	if err != nil {
 		t.Error("Failed to receive the share message", err)
 	}
 
-	v2, err = u2.LoadFile("file2")
+	t.Log("This is wonderful! File got shared! :)\n")
+	v, err = bob.LoadFile("file2")
+	if err != nil {
+		t.Error("Failed to download the file from alice", err)
+	}
+	t.Logf("User %s, filename %s, data = %s\n", bob.Username, "file2", v)
+
+	v2, err = alice.LoadFile("file1")
 	if err != nil {
 		t.Error("Failed to download the file after sharing", err)
 	}
@@ -152,4 +158,45 @@ func TestShare(t *testing.T) {
 		t.Error("Shared file is not the same", v, v2)
 	}
 
+	// bob shares the file with a 3rd user Charlie
+	charlie, err2 := InitUser("charlie", "shoobar")
+	if err2 != nil {
+		t.Error("Failed to initialize bob", err2)
+	}
+	msgid, err = bob.ShareFile("file2", "charlie")
+	t.Log(msgid)
+	if err != nil {
+		t.Error("Failed to share the file", err)
+	}
+	err = charlie.ReceiveFile("file3", "bob", msgid)
+	if err != nil {
+		t.Error("Failed to receive the share message", err)
+	}
+	v, err = charlie.LoadFile("file3")
+	if err != nil {
+		t.Error("Failed to download the file from bob", err)
+	}
+	t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
+
+	// Let Charlie append something
+	charlie.AppendFile("file3", []byte("This is new Text added by Charlie"))
+	// View Charlie's changes
+	v, err = charlie.LoadFile("file3")
+	if err != nil {
+		t.Error("Failed to download the file from charlie", err)
+	}
+	t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
+
+	// View Alice's changes
+	v, err = alice.LoadFile("file1")
+	if err != nil {
+		t.Error("Failed to download the file from alice", err)
+	}
+	t.Logf("User %s, filename %s, data = %s\n", alice.Username, "file1", v)
+
+	v, err = bob.LoadFile("file2")
+	if err != nil {
+		t.Error("Failed to download the file from bob", err)
+	}
+	t.Logf("User %s, filename %s, data = %s\n", bob.Username, "file1", v)
 }

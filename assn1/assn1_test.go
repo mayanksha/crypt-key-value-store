@@ -32,13 +32,6 @@ func TestInit(t *testing.T) {
 		t.Logf("Username =  %s\n", u.Username)
 		t.Logf("HMAC = %x", u.HMAC)
 	}
-	// key is private key
-	key, err := userlib.GenerateRSAKey()
-	if err != nil {
-		t.Error("Got RSA error", err)
-	}
-	userlib.KeystoreSet(aliceUser, key.PublicKey)
-
 	if err != nil {
 		// t.Error says the test fails
 		t.Error("Failed to initialize user", err)
@@ -65,9 +58,11 @@ func TestStorage(t *testing.T) {
 		t.Error("Failed to reload user", err)
 	}
 	t.Logf("Loaded user: username = %v\nHMAC = %x\n", u.Username, u.HMAC)
+	t.Log(prettyPrint(*u))
 
 	v := []byte("This is a test")
 	u.StoreFile("file1", v)
+	t.Log(prettyPrint(*u))
 
 	v2, err2 := u.LoadFile("file1")
 
@@ -96,6 +91,8 @@ func TestStorage(t *testing.T) {
 
 	v3 = []byte("Oh, this is a new FILE!!!!")
 	u.StoreFile("file1", v3)
+
+	t.Log(prettyPrint(*u))
 	v3, err = u.LoadFile("file1")
 	if err != nil {
 		t.Error(err)
@@ -114,39 +111,45 @@ func TestStorage(t *testing.T) {
 	t.Log(string(v2))
 }
 
-/*func TestShare(t *testing.T) {
- *  u, err := GetUser("alice", "fubar")
- *  if err != nil {
- *    t.Error("Failed to reload user", err)
- *  }
- *  u2, err2 := InitUser("bob", "foobar")
- *  if err2 != nil {
- *    t.Error("Failed to initialize bob", err2)
- *  }
- *
- *  var v, v2 []byte
- *  var msgid string
- *
- *  v, err = u.LoadFile("file1")
- *  if err != nil {
- *    t.Error("Failed to download the file from alice", err)
- *  }
- *
- *  msgid, err = u.ShareFile("file1", "bob")
- *  if err != nil {
- *    t.Error("Failed to share the a file", err)
- *  }
- *  err = u2.ReceiveFile("file2", "alice", msgid)
- *  if err != nil {
- *    t.Error("Failed to receive the share message", err)
- *  }
- *
- *  v2, err = u2.LoadFile("file2")
- *  if err != nil {
- *    t.Error("Failed to download the file after sharing", err)
- *  }
- *  if !reflect.DeepEqual(v, v2) {
- *    t.Error("Shared file is not the same", v, v2)
- *  }
- *
- *}*/
+func TestShare(t *testing.T) {
+	file1 := "file1"
+	u, err := GetUser("alice", "foobar")
+	/*t.Log(prettyPrint(*u))*/
+	if err != nil {
+		t.Error("Failed to load user", err)
+	}
+	v3 := []byte("Oh, this is a new FILE!!!!")
+	u.StoreFile(file1, v3)
+	u2, err2 := InitUser("bob", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize bob", err2)
+	}
+
+	var v, v2 []byte
+	var msgid string
+	v, err = u.LoadFile(file1)
+	if err != nil {
+		t.Error("Failed to download the file from alice", err)
+	}
+
+	t.Logf("User %s, filename %s, data = %s\n", u.Username, file1, v)
+	msgid, err = u.ShareFile("file1", "bob")
+	t.Log(msgid)
+	if err != nil {
+		t.Error("Failed to share the file", err)
+	}
+	t.Log("This is wonderful! File got shared! :)")
+	err = u2.ReceiveFile("file2", "alice", msgid)
+	if err != nil {
+		t.Error("Failed to receive the share message", err)
+	}
+
+	v2, err = u2.LoadFile("file2")
+	if err != nil {
+		t.Error("Failed to download the file after sharing", err)
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Shared file is not the same", v, v2)
+	}
+
+}

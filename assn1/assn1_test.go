@@ -8,6 +8,17 @@ import (
 	"encoding/hex"
 )
 
+func TestCFB(t *testing.T) {
+	key := []byte("example key 1234")
+	msg := "This is a Test"
+	ciphertext, iv := GetCFBEncrypt(key, []byte(msg), nil)
+
+	plaintext := GetCFBDecrypt(key, ciphertext, iv)
+	if msg != string(plaintext) {
+		t.Error("Decryption Failed")
+	}
+}
+
 // You can actually import other stuff if you want IN YOUR TEST
 // HARNESS ONLY.  Note that this is NOT considered part of your
 // solution, but is how you make sure your solution is correct.
@@ -16,7 +27,6 @@ func TestInit(t *testing.T) {
 	t.Logf("%x \n", sha256.Sum256([]byte("app")))
 	temp := hex.EncodeToString(userlib.Argon2Key([]byte("app"), nil, 32))
 	t.Logf("%v \n", temp)
-	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
 	t.Logf("%x \n", userlib.Argon2Key([]byte("app"), nil, 32))
 	t.Log("Initialization test")
 	userlib.DebugPrint = true

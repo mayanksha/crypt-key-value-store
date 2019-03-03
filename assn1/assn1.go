@@ -4,7 +4,7 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
-	"fmt"
+	/*"fmt"*/
 	// "time"
 
 	// You neet to add with
@@ -53,6 +53,7 @@ type FileSharingKey []byte
 // sharingRecord to serialized/deserialize in the data store.
 type sharingRecord struct {
 	MetadataIndex string
+	MetadataIV    []byte
 	FileKey       []byte
 	UUIDnonce     uuid.UUID
 	RSAsignature  []byte
@@ -106,8 +107,8 @@ func GetCFBDecrypt(key []byte, msg []byte, iv []byte) (plaintext []byte) {
 	return
 }
 func prettyPrint(i interface{}) {
-	s, _ := json.MarshalIndent(i, "", "\t")
-	fmt.Println(string(s))
+	/*s, _ := json.MarshalIndent(i, "", "\t")
+	 *fmt.Println(string(s))*/
 }
 
 // Helper function to get hex encoded Argon2 hash -- Outputs 32 bytes
@@ -277,7 +278,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 		return nil, err
 	}
 
-	fmt.Printf("Symm len = %d, IV Len = %d\n", len(userdata.SymmetricKey), len(userDataIV))
+	/*fmt.Printf("Symm len = %d, IV Len = %d\n", len(userdata.SymmetricKey), len(userDataIV))*/
 	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
 	userDataMap[hashedUsername] = cipher
 
@@ -344,7 +345,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 // This stores a file in the datastore.
 // The name of the file should NOT be revealed to the datastore!
 func (userdata *User) StoreFile(filename string, data []byte) {
-	fmt.Println("[StoreFile]")
+	/*fmt.Println("[StoreFile]")*/
 	if userdata == nil {
 		return
 	}
@@ -637,7 +638,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 // This loads a file from the Datastore.
 // It should give an error if the file is corrupted in any way.
 func (userdata *User) LoadFile(filename string) (data []byte, err error) {
-	fmt.Println("[LoadFile]")
+	/*fmt.Println("[LoadFile]")*/
 	if userdata == nil {
 		return nil, errors.New("[LoadFile]: nil userdata pointer")
 	}
@@ -657,7 +658,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		return nil, errors.New("[LoadFile]: userdata.FileKeys[filename] returned nothing")
 	}
 	fileKey := userdata.FileKeys[filename].FileKey
-	val = GetCFBDecrypt([]byte(fileKey), val, metadataIV)
+	/*fmt.Printf("filekey and metadataIV\n")
+	 *fmt.Println(fileKey)
+	 *fmt.Println(metadataIV)*/
+	val = GetCFBDecrypt(fileKey, val, metadataIV)
 	//get file key
 	var metadata MetaData
 	json.Unmarshal(val, &metadata)
@@ -729,6 +733,12 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	if !ok {
 		return "", errors.New("[ShareFile] : " + filename + "not found")
 	}
+
+	fileKeys, ok := userdata.FileKeys[filename]
+	if !ok {
+		return "", errors.New("[ShareFile] : Error with getting userdata.FileKeys[" + filename + "]")
+	}
+
 	//get recipient's pub key
 	Rekey, ok := userlib.KeystoreGet(recipient)
 	if !ok {
@@ -737,6 +747,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	var sharemsg sharingRecord
 
 	sharemsg.MetadataIndex = metadataIndexHashed
+	sharemsg.MetadataIV = fileKeys.MetaDataIV
 	// Just encrypt the filekey with public key
 	sharemsg.FileKey, err = userlib.RSAEncrypt(&Rekey, []byte(userdata.FileKeys[filename].FileKey), nil) // TODO TAG in RSAENCRYPT
 	if err != nil {
@@ -787,10 +798,6 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 		return errors.New("[ReceiveFile]: msgid is wrong")
 	}
 	//decrypt with user's priv key
-	/*decrypted, err := userlib.RSADecrypt(&userdata.PrivateKey, ciphertext, nil)
-	 *if err != nil {
-	 *  return err
-	 *}*/
 	var sharemsg sharingRecord
 	json.Unmarshal(ciphertext, &sharemsg)
 
@@ -816,32 +823,37 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 		return err
 	}
 	// update users.filekey
-	userdata.FileKeys[filename] = FileCredentials{nil, FileSharingKey(decrypted)}
+	userdata.FileKeys[filename] = FileCredentials{sharemsg.MetadataIV, FileSharingKey(decrypted)}
 	userdata.MetadataIndex[filename] = sharemsg.MetadataIndex
-
 	userdata.HMAC, err = UserHMAC(*userdata)
 
-	val, ok := userlib.DatastoreGet(userDataString)
+	_, ok = userlib.DatastoreGet(userDataString)
 	if !ok {
 		return errors.New("[ReceiveFile]: Errors while getting userDataString")
 	}
+	var userDataMap map[string][]byte
 
-	val = GetCFBDecrypt([]byte(userdata.SymmetricKey), val, userDataIV)
-	var userDataMap map[string]User
-	json.Unmarshal(val, &userDataMap)
-
-	// TODO: CFB encryption using Symmetric Key
 	hashedUsername := Argon2Hash(userdata.Username)
-	userDataMap[hashedUsername] = *userdata
-	bytes, err := json.Marshal(userDataMap)
-	if err != nil {
-		return errors.New("[ReceiveFile]: Errors while Marshaling userDataMap")
+	_, ok = userDataMap[hashedUsername]
+	if !ok {
+		return errors.New("[ReceiveFile]: Errors while getting user from userDataMap")
 	}
-	cipher, _ := GetCFBEncrypt([]byte(userdata.SymmetricKey), bytes, userDataIV)
-	userlib.DatastoreSet(userDataString, cipher)
+
+	// Marshal the userdata
+	bytes, err := json.Marshal(userdata)
 	if err != nil {
 		return err
 	}
+	// Encrypt the userdata now
+	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
+	userDataMap[hashedUsername] = cipher
+
+	bytes, err = json.Marshal(userDataMap)
+	if err != nil {
+		return err
+	}
+
+	userlib.DatastoreSet(userDataString, bytes)
 	return nil
 }
 

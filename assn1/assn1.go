@@ -106,10 +106,11 @@ func GetCFBDecrypt(key []byte, msg []byte, iv []byte) (plaintext []byte) {
 	plaintext = msg[len(key):]
 	return
 }
-func prettyPrint(i interface{}) {
-	/*s, _ := json.MarshalIndent(i, "", "\t")
-	 *fmt.Println(string(s))*/
-}
+
+/*func PrettyPrint(i interface{}) {
+ *  s, _ := json.MarshalIndent(i, "", "\t")
+ *  fmt.Println(string(s))
+ *}*/
 
 // Helper function to get hex encoded Argon2 hash -- Outputs 32 bytes
 func Argon2Hash(toHash string) string {
@@ -338,7 +339,6 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		err := errors.New("[GetUser]: User's data has been tampered.")
 		return nil, err
 	}
-	/*prettyPrint(userdata)*/
 	return &userdata, nil
 }
 
@@ -390,7 +390,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 			userlib.DatastoreSet(metadataIndexHashed, nil)
 			return
 		}
-		// fmt.Println(prettyPrint(oldMetadata))
 		if userlib.Equal(calcMetadataHMAC, oldMetadata.HMAC) != true {
 			panic(errors.New("[StoreFile]: Someone tried to store a file of which he wasn't the owner."))
 		}
@@ -595,29 +594,21 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		return err
 	}
 	block.HMAC = hmac
-
-	//fmt.Printf("Block HMAC = %v\n", block.HMAC)
-	//fmt.Println(block.HMAC)
 	bytes, err := json.Marshal(block)
 	if err != nil {
 		return err
 	}
-	// TODO: encryption
 	cipher, newBlockIV := GetCFBEncrypt([]byte(fileKey), bytes, nil)
 	userlib.DatastoreSet(newBlockIndexHashed, cipher)
 
-	/*
-	 *   Update the HMAC of Metadata
-	 **/
-
-	// ******************** Store Metadata
+	// ******************** Store Metadata ***********************
 	// Update the LastBlock details in metadata
 	metadata.LastUUIDNonce = newUUIDNonce
 	metadata.LastBlock = newBlockIndexHashed
 	metadata.LastEditBy = Argon2Hash(userdata.Username)
 	metadata.LastBlockIV = newBlockIV
 
-	hmac, err = MetadataHMAC(metadata, []byte(fileKey))
+	hmac, err = MetadataHMAC(metadata, fileKey)
 	if err != nil {
 		panic(err)
 	}
@@ -631,7 +622,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	// Use previous metadataIV so that you don't have to update IV in User struct
 	cipher, metadataIV = GetCFBEncrypt([]byte(fileKey), bytes, metadataIV)
 	userlib.DatastoreSet(metadataIndexHashed, cipher)
-	// ********************
+	// ***************************************************************
 	return nil
 }
 
@@ -658,9 +649,6 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		return nil, errors.New("[LoadFile]: userdata.FileKeys[filename] returned nothing")
 	}
 	fileKey := userdata.FileKeys[filename].FileKey
-	/*fmt.Printf("filekey and metadataIV\n")
-	 *fmt.Println(fileKey)
-	 *fmt.Println(metadataIV)*/
 	val = GetCFBDecrypt(fileKey, val, metadataIV)
 	//get file key
 	var metadata MetaData
@@ -759,16 +747,13 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
 	//take  hash  for signature
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
-	// fmt.Println(prettyPrint(sharingRecordHASH))
 
-	//TODO : signature with UUIDnonce
 	sharemsg.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH))
 
 	randUUID := uuid.New().String()
 	shareid := Argon2Hash(randUUID)
 
-	// fmt.Println(prettyPrint(sharemsg))
-	bytes, err := json.Marshal(sharemsg) //
+	bytes, err := json.Marshal(sharemsg)
 	if err != nil {
 		return "", err
 	}
@@ -782,7 +767,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 // what the filename even is!  However, the recipient must ensure that
 // it is authentically from the sender
 func (userdata *User) ReceiveFile(filename string, sender string, msgid string) error {
-	// fmt.Printf("\n[ReceiveFile]: \n")
+	/*fmt.Printf("\n[ReceiveFile]: \n")*/
 
 	if userdata == nil {
 		return errors.New("[ReceiveFile]: nil userdata pointer")
@@ -801,7 +786,6 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	var sharemsg sharingRecord
 	json.Unmarshal(ciphertext, &sharemsg)
 
-	// fmt.Println(prettyPrint(sharemsg))
 	// Pubkey of sender  from keyStore
 	Sekey, ok := userlib.KeystoreGet(sender)
 	if !ok {
@@ -809,9 +793,7 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	}
 	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
-	// fmt.Println(prettyPrint(sharingRecordHASH))
 
-	// verify signature TODO: update 'nil' below to msg
 	err := userlib.RSAVerify(&Sekey, []byte(sharingRecordHASH), sharemsg.RSAsignature)
 
 	if err != nil {
@@ -827,11 +809,13 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	userdata.MetadataIndex[filename] = sharemsg.MetadataIndex
 	userdata.HMAC, err = UserHMAC(*userdata)
 
-	_, ok = userlib.DatastoreGet(userDataString)
+	val, ok := userlib.DatastoreGet(userDataString)
 	if !ok {
 		return errors.New("[ReceiveFile]: Errors while getting userDataString")
 	}
 	var userDataMap map[string][]byte
+
+	json.Unmarshal(val, &userDataMap)
 
 	hashedUsername := Argon2Hash(userdata.Username)
 	_, ok = userDataMap[hashedUsername]
@@ -859,89 +843,125 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 
 // Removes access for all others.
 func (userdata *User) RevokeFile(filename string) (err error) {
+	/*fmt.Println("[RevokeFile]")*/
 	metadataIndexHashed := userdata.MetadataIndex[filename]
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
-
 	if !ok {
 		return errors.New("[RevokeFile]: error while accessing metadata")
 	}
+
+	fileKeys, ok := userdata.FileKeys[filename]
+	if !ok {
+		return errors.New("")
+	}
+	oldFilekey := fileKeys.FileKey
+	metadataIV := fileKeys.MetaDataIV
+	val = GetCFBDecrypt(oldFilekey, val, metadataIV)
+
 	// TODO: Decrypt the metadata here using the file
 	// TODO: Check if the owner is the same
 	// Decrypt the bytes, then unmarshal
 	var metadata MetaData
 	json.Unmarshal(val, &metadata)
 
+	if userdata.Username != metadata.Owner {
+		return errors.New("[RevokeFile]: Sorry, you're not the owner and hence not allowed to Revoke")
+	}
 	/*
 	 *   Use the old File Key to decrypt the metadata, then decrypt all the blocks
 	 *   and reencrypt all blocks with newFileKey
 	 * 	 oldFileKey := userdata.FileKeys[filename]
 	 **/
-	var temp [][]byte
-	var data []byte
-	fileKey := userdata.FileKeys[filename].FileKey
+
+	// Generate a new FileKey
+	randUUID := uuid.New().String()
+	newFilekey := FileSharingKey(Argon2PasswordHash(randUUID))
+
 	prevBlockHash := metadata.LastBlock
+	prevBlockIV := metadata.LastBlockIV
 	for prevBlockHash != "" {
-		//fmt.Printf("Metadata LastBlock = %v\n", prevBlockHash)
 		val, ok := userlib.DatastoreGet(prevBlockHash)
 		// check if block is present or not
 		if !ok {
-			return errors.New("[LoadFile]: Failed")
+			return errors.New("[RevokeFile]: Failed")
 		}
 		var block Block
+		val = GetCFBDecrypt([]byte(oldFilekey), val, prevBlockIV)
 		json.Unmarshal(val, &block)
-		calcBlockHMAC, err := BlockHMAC(block, []byte(fileKey))
 
+		calcBlockHMAC, err := BlockHMAC(block, oldFilekey)
 		if err != nil {
-			return errors.New("[LoadFile]: Failed")
+			return errors.New("[RevokeFile]: Failed")
 		}
-
-		//check block  HMAC
-		//fmt.Println(calcBlockHMAC)
-		//fmt.Println(block.HMAC)
 		if userlib.Equal(calcBlockHMAC, block.HMAC) != true {
-			return errors.New("[LoadFile]: Failed HMAC unequal")
+			return errors.New("[RevokeFile]: Failed HMAC unequal")
 		}
+		// Update the HMAC of block with newFileKey
+		block.HMAC, _ = BlockHMAC(block, newFilekey)
+		// Now re-encrypt the block with newfilekey
+		blockBytes, err := json.Marshal(block)
+		if err != nil {
+			panic(err)
+		}
+		cipher, _ := GetCFBEncrypt(newFilekey, blockBytes, prevBlockIV)
+		userlib.DatastoreSet(prevBlockHash, cipher)
 
-		//fmt.Println(block.Owner)
-		//fmt.Println(block.PrevBlockHash)
-		//fmt.Println(string(block.Content))
-		temp = append(temp, block.Content)
 		prevBlockHash = block.PrevBlockHash
-	}
-	// Reverse iterate over temp to get data in correct order
-	for i := len(temp) - 1; i >= 0; i-- {
-		// Below is a variadic function
-		// https://stackoverflow.com/questions/16248241/concatenate-two-slices-in-go
-		data = append(data, temp[i]...)
-		//fmt.Println(string(data))
+		prevBlockIV = block.PrevBlockIV
 	}
 
+	// ************************************
+	// Now re-encrypt the metadata with newfilekey
+	hmac, _ := MetadataHMAC(metadata, newFilekey)
+	metadata.HMAC = hmac
+	metadataBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	cipher, _ := GetCFBEncrypt(newFilekey, metadataBytes, metadataIV)
+	userlib.DatastoreSet(metadataIndexHashed, cipher)
+
+	val, ok = userlib.DatastoreGet(metadataIndexHashed)
+	val = GetCFBDecrypt(newFilekey, val, metadataIV)
+	json.Unmarshal(val, &metadata)
+
+	// ************************************
+
+	val, _ = userlib.DatastoreGet(userDataString)
+	var userDataMap map[string][]byte
+	json.Unmarshal(val, &userDataMap)
+
+	hashedUsername := Argon2Hash(userdata.Username)
+
+	userdata.FileKeys[filename] = FileCredentials{metadataIV, newFilekey}
+	hmac, err = UserHMAC(*userdata)
+	if err != nil {
+		return err
+	}
+	userdata.HMAC = hmac
+
+	userdataBytes, err := json.Marshal(userdata)
+	if err != nil {
+		return
+	}
+	cipher, _ = GetCFBEncrypt(userdata.SymmetricKey, userdataBytes, userDataIV)
+	userDataMap[hashedUsername] = cipher
+
+	userDataMapBytes, err := json.Marshal(userDataMap)
+	if err != nil {
+		return
+	}
+	userlib.DatastoreSet(userDataString, userDataMapBytes)
+
+	/*val, ok = userDataMap[hashedUsername]
+	 *if !ok {
+	 *  err := errors.New("[GetUser]: User not present in Datastore.")
+	 *  return err
+	 *}
+	 * Below val is the actual decrypted bytes of User struct
+	 *val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
+	 *var foobar User
+	 *json.Unmarshal(val, &foobar)
+	 *PrettyPrint(foobar)*/
 	return nil
 }
-
-/*func verifyFileIntegrity(userdata User, metadata MetaData) error {
- *  for true {
- *    val, ok := userlib.DatastoreGet(metadata.LastBlock)
- *    // check if block is present or not
- *    if !ok {
- *      return errors.New("[verifyFileIntegrity]: Failed")
- *    }
- *    var block Block
- *    json.Unmarshal(val, &block)
- *    calcBlocHMAC, err := BlockHMAC(block, userdata.SymmetricKey)
- *
- *    if err != nil {
- *      return err
- *    }
- *
- *    //check block  HMAC
- *    if userlib.Equal(calcBlockHMAC, block.HMAC) != true {
- *      return errors.New("[verifyFileIntegrity]: Failed")
- *    }
- *    prevBlockHash := block.PrevBlockHash
- *    if prevBlockHash == "" {
- *      break
- *    }
- *  }
- *  return nil
- *}*/

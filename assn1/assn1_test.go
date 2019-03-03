@@ -8,16 +8,16 @@ import (
 	"encoding/hex"
 )
 
-func TestCFB(t *testing.T) {
-	key := []byte("example key 1234")
-	msg := "This is a Test"
-	ciphertext, iv := GetCFBEncrypt(key, []byte(msg), nil)
-
-	plaintext := GetCFBDecrypt(key, ciphertext, iv)
-	if msg != string(plaintext) {
-		t.Error("Decryption Failed")
-	}
-}
+/*func TestCFB(t *testing.T) {
+ *  key := []byte("example key 1234")
+ *  msg := "This is a Test"
+ *  ciphertext, iv := GetCFBEncrypt(key, []byte(msg), nil)
+ *
+ *  plaintext := GetCFBDecrypt(key, ciphertext, iv)
+ *  if msg != string(plaintext) {
+ *    t.Error("Decryption Failed")
+ *  }
+ *}*/
 
 // You can actually import other stuff if you want IN YOUR TEST
 // HARNESS ONLY.  Note that this is NOT considered part of your
@@ -185,8 +185,9 @@ func TestShare(t *testing.T) {
 	v, err = charlie.LoadFile("file3")
 	if err != nil {
 		t.Error("Failed to download the file from bob", err)
+	} else {
+		t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
 	}
-	t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
 
 	// Let Charlie append something
 	charlie.AppendFile("file3", []byte("This is new Text added by Charlie"))
@@ -194,19 +195,55 @@ func TestShare(t *testing.T) {
 	v, err = charlie.LoadFile("file3")
 	if err != nil {
 		t.Error("Failed to download the file from charlie", err)
+	} else {
+		t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
 	}
-	t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
 
 	// View Alice's changes
 	v, err = alice.LoadFile("file1")
 	if err != nil {
 		t.Error("Failed to download the file from alice", err)
+	} else {
+		t.Logf("User %s, filename %s, data = %s\n", alice.Username, "file1", v)
 	}
-	t.Logf("User %s, filename %s, data = %s\n", alice.Username, "file1", v)
 
 	v, err = bob.LoadFile("file2")
 	if err != nil {
 		t.Error("Failed to download the file from bob", err)
+	} else {
+		t.Logf("User %s, filename %s, data = %s\n", bob.Username, "file1", v)
 	}
-	t.Logf("User %s, filename %s, data = %s\n", bob.Username, "file1", v)
+
+	/*PrettyPrint(alice)
+	 *PrettyPrint(bob)
+	 *PrettyPrint(charlie)*/
+
+	err = charlie.RevokeFile("file3")
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = bob.RevokeFile("file2")
+	if err != nil {
+		t.Error(err)
+	}
+	err = alice.RevokeFile("file1")
+	if err != nil {
+		t.Error(err)
+	}
+
+	v, err = bob.LoadFile("file2")
+	if err != nil {
+		t.Error("Failed to download the file from bob", err)
+	} else {
+		t.Logf("User %s, filename %s, data = %s\n", bob.Username, "file1", v)
+	}
+
+	// View Alice's changes
+	v, err = alice.LoadFile("file1")
+	if err != nil {
+		t.Error("Failed to download the file from alice", err)
+	} else {
+		t.Logf("User %s, filename %s, data = %s\n", alice.Username, "file1", v)
+	}
 }

@@ -91,8 +91,8 @@ func GetCFBEncrypt(key []byte, msg []byte, givenIV []byte) (ciphertext []byte, i
 	} else {
 		copy(iv, givenIV)
 	}
-	fmt.Println(hex.EncodeToString(key))
-	fmt.Println(hex.EncodeToString(iv))
+	/*fmt.Println(hex.EncodeToString(key))
+	 *fmt.Println(hex.EncodeToString(iv))*/
 	cipher := userlib.CFBEncrypter(key, iv)
 	cipher.XORKeyStream(ciphertext[len(key):], []byte(msg))
 	return
@@ -105,9 +105,9 @@ func GetCFBDecrypt(key []byte, msg []byte, iv []byte) (plaintext []byte) {
 	plaintext = msg[len(key):]
 	return
 }
-func prettyPrint(i interface{}) string {
+func prettyPrint(i interface{}) {
 	s, _ := json.MarshalIndent(i, "", "\t")
-	return string(s)
+	fmt.Println(string(s))
 }
 
 // Helper function to get hex encoded Argon2 hash -- Outputs 32 bytes
@@ -285,7 +285,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	if err != nil {
 		return nil, err
 	}
-	userlib.DatastoreSet(userDataString, cipher)
+	userlib.DatastoreSet(userDataString, bytes)
 	return &userdata, err
 }
 
@@ -297,13 +297,13 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
  *		TODO: check for encryption, make all the errors same
  */
 func GetUser(username string, password string) (userdataptr *User, err error) {
+	hashedPass := Argon2PasswordHash(password)
 	// val contains the byte slice for the whole userDataMap
 	val, ok := userlib.DatastoreGet(userDataString)
 	if !ok {
 		err := errors.New("[GetUser]: userDataString wasn't indexed in Datastore.")
 		return nil, err
 	}
-	hashedPass := Argon2PasswordHash(password)
 	var userDataMap map[string][]byte
 
 	json.Unmarshal(val, &userDataMap)
@@ -316,7 +316,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		return nil, err
 	}
 	// Below val is the actual decrypted bytes of User struct
-	val = GetCFBDecrypt([]byte(hashedPass), val, userDataIV)
+	val = GetCFBDecrypt(hashedPass, val, userDataIV)
 	var userdata User
 	json.Unmarshal(val, &userdata)
 
@@ -337,17 +337,17 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		err := errors.New("[GetUser]: User's data has been tampered.")
 		return nil, err
 	}
-
+	/*prettyPrint(userdata)*/
 	return &userdata, nil
 }
 
 // This stores a file in the datastore.
 // The name of the file should NOT be revealed to the datastore!
 func (userdata *User) StoreFile(filename string, data []byte) {
+	fmt.Println("[StoreFile]")
 	if userdata == nil {
 		return
 	}
-	//fmt.Println("[StoreFile]")
 
 	/*
 	 * TODO: Store encrypted filenames in FilenameMap (is it even useful?)
@@ -377,8 +377,8 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	} else {
 		metadataIV = nil
 	}
-	val = GetCFBDecrypt([]byte(fileKeys.FileKey), val, metadataIV)
 	if ok {
+		val = GetCFBDecrypt([]byte(fileKeys.FileKey), val, metadataIV)
 		json.Unmarshal(val, &oldMetadata)
 
 		// Check the HMAC
@@ -395,8 +395,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 		}
 
 		// TODO: Encryption with below key
-		fileKey = userdata.FileKeys[filename].FileKey
-
+		fileKey = fileKeys.FileKey
 		// Set new Owner
 		metadata.Owner = userdata.Username
 		hashedUsername := Argon2Hash(userdata.Username)
@@ -439,23 +438,21 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	// Update MetadataIndex inside userdata and also the HMAC too
 	userdata.MetadataIndex[filename] = metadataIndexHashed
 
-	_, ok = userlib.DatastoreGet(userDataString)
+	val, ok = userlib.DatastoreGet(userDataString)
 	if !ok {
 		return
 	}
-	val, ok = userlib.DatastoreGet(userDataString)
-	val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
-
+	// Again get the userdatamap so as to update the new file key, IV and metadataIndex
 	var userDataMap map[string][]byte
 	json.Unmarshal(val, &userDataMap)
+
 	// TODO: CFB encryption using Symmetric Key
 	hashedUsername := Argon2Hash(userdata.Username)
 	// Marshal Metadata and store in Datastore
 
 	_, ok = userlib.DatastoreGet(metadata.GenesisBlock)
-
-	// For first store, block must not be present
 	if ok {
+		// Next to impossible, since two random hashes are very unlikely to collide
 		errString := "[StoreFile] [Argon2Key BlockHash Collision]: " + blockIndex + " Collided"
 		panic(errString)
 	}
@@ -470,7 +467,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 
 	// Get the HMAC of the current block structure
 	// ******************** StoreBlock
-	hmac, err := BlockHMAC(block, []byte(fileKey))
+	hmac, err := BlockHMAC(block, fileKey)
 	if err != nil {
 		panic(err)
 	}
@@ -479,14 +476,14 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	if err != nil {
 		panic(err)
 	}
-	cipher, blockIV := GetCFBEncrypt([]byte(fileKey), blockBytes, nil)
+	cipher, blockIV := GetCFBEncrypt(fileKey, blockBytes, nil)
 	userlib.DatastoreSet(metadata.GenesisBlock, cipher)
 	// ********************
 
 	// ******************** Store Metadata
 	// Get the HMAC of the current metadata structure
 	metadata.LastBlockIV = blockIV
-	hmac, err = MetadataHMAC(metadata, []byte(userdata.FileKeys[filename].FileKey))
+	hmac, err = MetadataHMAC(metadata, fileKey)
 	if err != nil {
 		panic(err)
 	}
@@ -495,8 +492,17 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	if err != nil {
 		panic(err)
 	}
-	cipher, metadataIV = GetCFBEncrypt([]byte(fileKey), metadataBytes, metadataIV)
+	if metadataIV == nil {
+		cipher, metadataIV = GetCFBEncrypt(fileKey, metadataBytes, nil)
+	} else {
+		cipher, _ = GetCFBEncrypt(fileKey, metadataBytes, metadataIV)
+	}
+
 	userlib.DatastoreSet(metadataIndexHashed, cipher)
+
+	val, ok = userlib.DatastoreGet(metadataIndexHashed)
+	val = GetCFBDecrypt(fileKey, val, metadataIV)
+	json.Unmarshal(val, &metadata)
 	// ********************
 
 	// ******************** Store Userdata
@@ -519,7 +525,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	}
 	userlib.DatastoreSet(userDataString, userDataMapBytes)
 	// ********************
-
 	return
 }
 
@@ -626,13 +631,13 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	cipher, metadataIV = GetCFBEncrypt([]byte(fileKey), bytes, metadataIV)
 	userlib.DatastoreSet(metadataIndexHashed, cipher)
 	// ********************
-
 	return nil
 }
 
 // This loads a file from the Datastore.
 // It should give an error if the file is corrupted in any way.
 func (userdata *User) LoadFile(filename string) (data []byte, err error) {
+	fmt.Println("[LoadFile]")
 	if userdata == nil {
 		return nil, errors.New("[LoadFile]: nil userdata pointer")
 	}
@@ -658,8 +663,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	json.Unmarshal(val, &metadata)
 
 	//check the HMAC
-	calcMetadataHMAC, err := MetadataHMAC(metadata, []byte(userdata.FileKeys[filename].FileKey))
-
+	calcMetadataHMAC, err := MetadataHMAC(metadata, fileKey)
+	if err != nil {
+		return nil, err
+	}
 	if userlib.Equal(calcMetadataHMAC, metadata.HMAC) != true {
 		return nil, errors.New("[LoadFile]: Something Wrong with MetaDataHMAC")
 	}

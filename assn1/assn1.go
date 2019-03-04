@@ -4,7 +4,6 @@ package assn1
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
-	/*"fmt"*/
 	// "time"
 
 	// You neet to add with
@@ -35,7 +34,9 @@ import (
 var fileBlocksString string = Argon2Hash("FileBlocksString")
 var metaDataString string = Argon2Hash("MetaDataString")
 var userDataString string = Argon2Hash("UserDataString")
-var userDataIV []byte = userlib.RandomBytes(userlib.BlockSize)
+var shareDatastring string = Argon2Hash("ShareDataString")
+
+/*var userDataIV []byte = userlib.RandomBytes(userlib.BlockSize)*/
 
 // The structure definition for a user record
 type User struct {
@@ -107,10 +108,10 @@ func GetCFBDecrypt(key []byte, msg []byte, iv []byte) (plaintext []byte) {
 	return
 }
 
-/*func PrettyPrint(i interface{}) {
- *  s, _ := json.MarshalIndent(i, "", "\t")
- *  fmt.Println(string(s))
- *}*/
+func PrettyPrint(i interface{}) {
+	s, _ := json.MarshalIndent(i, "", "\t")
+	userlib.DebugMsg(string(s))
+}
 
 // Helper function to get hex encoded Argon2 hash -- Outputs 32 bytes
 func Argon2Hash(toHash string) string {
@@ -120,6 +121,10 @@ func Argon2Hash(toHash string) string {
 // Helper function to get hex encoded Argon2 hash of password -- Outputs 64 bytes
 func Argon2PasswordHash(password string) []byte {
 	return userlib.Argon2Key([]byte(password), nil, uint32(userlib.BlockSize))
+}
+
+func GetIV(str []byte) []byte {
+	return userlib.Argon2Key(str, nil, uint32(userlib.BlockSize))
 }
 
 func MetadataHMAC(metadata MetaData, SymmetricKey []byte) ([]byte, error) {
@@ -280,6 +285,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	}
 
 	/*fmt.Printf("Symm len = %d, IV Len = %d\n", len(userdata.SymmetricKey), len(userDataIV))*/
+	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
 	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
 	userDataMap[hashedUsername] = cipher
 
@@ -318,6 +324,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		return nil, err
 	}
 	// Below val is the actual decrypted bytes of User struct
+	userDataIV := GetIV(GetIV([]byte(username)))
 	val = GetCFBDecrypt(hashedPass, val, userDataIV)
 	var userdata User
 	json.Unmarshal(val, &userdata)
@@ -516,6 +523,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	if err != nil {
 		return
 	}
+	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
 	cipher, _ = GetCFBEncrypt(userdata.SymmetricKey, userdataBytes, userDataIV)
 	userDataMap[hashedUsername] = cipher
 
@@ -540,8 +548,33 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	}
 	//fmt.Println("AppendFile called: " + filename + string(data))
 
+	// **************************************************************
+	// Copied from GetUser
+	val, ok := userlib.DatastoreGet(userDataString)
+	if !ok {
+		return errors.New("[GetUser]: userDataString wasn't indexed in Datastore.")
+	}
+	var userDataMap map[string][]byte
+	json.Unmarshal(val, &userDataMap)
+
+	hashedUsername := Argon2Hash(userdata.Username)
+	val, ok = userDataMap[hashedUsername]
+	if !ok {
+		err := errors.New("[GetUser]: User not present in Datastore.")
+		return err
+	}
+	// Below val is the actual decrypted bytes of User struct
+	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
+	val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
+	var getUserAgain User
+	json.Unmarshal(val, &getUserAgain)
+	userdata.FileKeys = getUserAgain.FileKeys
+	userdata.MetadataIndex = getUserAgain.MetadataIndex
+	userdata.HMAC, _ = UserHMAC(*userdata)
+	// **************************************************************
+
 	metadataIndexHashed := userdata.MetadataIndex[filename]
-	val, ok := userlib.DatastoreGet(metadataIndexHashed)
+	val, ok = userlib.DatastoreGet(metadataIndexHashed)
 	if !ok {
 		return errors.New("[AppendFile]: File not Found: " + filename)
 	}
@@ -633,9 +666,36 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	if userdata == nil {
 		return nil, errors.New("[LoadFile]: nil userdata pointer")
 	}
+
+	// **************************************************************
+	// Copied from GetUser
+	val, ok := userlib.DatastoreGet(userDataString)
+	if !ok {
+		err := errors.New("[GetUser]: userDataString wasn't indexed in Datastore.")
+		return nil, err
+	}
+	var userDataMap map[string][]byte
+	json.Unmarshal(val, &userDataMap)
+
+	hashedUsername := Argon2Hash(userdata.Username)
+	val, ok = userDataMap[hashedUsername]
+	if !ok {
+		err := errors.New("[GetUser]: User not present in Datastore.")
+		return nil, err
+	}
+	// Below val is the actual decrypted bytes of User struct
+	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
+	val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
+	var getUserAgain User
+	json.Unmarshal(val, &getUserAgain)
+	userdata.FileKeys = getUserAgain.FileKeys
+	userdata.MetadataIndex = getUserAgain.MetadataIndex
+	userdata.HMAC, _ = UserHMAC(*userdata)
+	// **************************************************************
+
 	//fmt.Println("LoadFile called: " + filename)
 	metadataIndexHashed := userdata.MetadataIndex[filename]
-	val, ok := userlib.DatastoreGet(metadataIndexHashed)
+	val, ok = userlib.DatastoreGet(metadataIndexHashed)
 	if !ok {
 		return nil, errors.New("[LoadFile]: File not Found: " + filename)
 	}
@@ -744,7 +804,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	// To prevent a replay attack
 	sharemsg.UUIDnonce = uuid.New()
 
-	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
+	sharingRecordSUM := sharemsg.MetadataIndex + sharemsg.UUIDnonce.String() + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
 	//take  hash  for signature
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
 
@@ -753,12 +813,41 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	randUUID := uuid.New().String()
 	shareid := Argon2Hash(randUUID)
 
+	var shareDataMap map[string][]byte
+	_, ok = userlib.DatastoreGet(shareDatastring)
+	if !ok {
+		shareDataMap = make(map[string][]byte)
+		bytes, err := json.Marshal(shareDataMap)
+		if err != nil {
+			return "", err
+		}
+		userlib.DatastoreSet(shareDatastring, bytes)
+	}
+	val, ok := userlib.DatastoreGet(shareDatastring)
+	json.Unmarshal(val, &shareDataMap)
+
+	_, ok = shareDataMap[shareid]
+	if ok {
+		return "", errors.New("[ShareFile]: Random Hash Collision")
+	}
+
+	/*PrettyPrint(sharemsg)*/
 	bytes, err := json.Marshal(sharemsg)
 	if err != nil {
 		return "", err
 	}
+	shareDataMap[shareid] = bytes
+	bytes, err = json.Marshal(shareDataMap)
+	if err != nil {
+		return "", err
+	}
+	userlib.DatastoreSet(shareDatastring, bytes) //store the encrypted sharemsg []byte in Datastore
 
-	userlib.DatastoreSet(shareid, bytes) //store the encrypted sharemsg []byte in Datastore
+	/*val, ok = userlib.DatastoreGet(shareDatastring)
+	 *json.Unmarshal(val, &shareDataMap)
+	 *bytes, ok = shareDataMap[msgid]
+	 *json.Unmarshal(bytes, &sharemsg)
+	 *PrettyPrint(sharemsg)*/
 	return shareid, err
 }
 
@@ -777,21 +866,27 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	// Get the Pubkey of sender
 	// Use the sender's pubkey to verify signature
 	// User Filekeys update
-	ciphertext, ok := userlib.DatastoreGet(msgid)
-	// get ciphertext assosciated with msgid
+
+	val, ok := userlib.DatastoreGet(shareDatastring)
 	if !ok {
-		return errors.New("[ReceiveFile]: msgid is wrong")
+		return errors.New("[ReceiveFile]: shareDatastring wasn't indexed in Datastore.")
 	}
-	//decrypt with user's priv key
+	var shareDataMap map[string][]byte
+	json.Unmarshal(val, &shareDataMap)
+
+	bytes, ok := shareDataMap[msgid]
+	if !ok {
+		return errors.New("[ReceiveFile]: msgid note found in shareDataMap")
+	}
 	var sharemsg sharingRecord
-	json.Unmarshal(ciphertext, &sharemsg)
+	json.Unmarshal(bytes, &sharemsg)
 
 	// Pubkey of sender  from keyStore
 	Sekey, ok := userlib.KeystoreGet(sender)
 	if !ok {
 		return errors.New("[ReceiveFile] : Sender =  " + sender + "not found")
 	}
-	sharingRecordSUM := sharemsg.MetadataIndex + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
+	sharingRecordSUM := sharemsg.MetadataIndex + sharemsg.UUIDnonce.String() + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
 
 	err := userlib.RSAVerify(&Sekey, []byte(sharingRecordHASH), sharemsg.RSAsignature)
@@ -807,9 +902,9 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	// update users.filekey
 	userdata.FileKeys[filename] = FileCredentials{sharemsg.MetadataIV, FileSharingKey(decrypted)}
 	userdata.MetadataIndex[filename] = sharemsg.MetadataIndex
-	userdata.HMAC, err = UserHMAC(*userdata)
+	userdata.HMAC, _ = UserHMAC(*userdata)
 
-	val, ok := userlib.DatastoreGet(userDataString)
+	val, ok = userlib.DatastoreGet(userDataString)
 	if !ok {
 		return errors.New("[ReceiveFile]: Errors while getting userDataString")
 	}
@@ -824,26 +919,33 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	}
 
 	// Marshal the userdata
-	bytes, err := json.Marshal(userdata)
+	bytes, err = json.Marshal(userdata)
 	if err != nil {
 		return err
 	}
 	// Encrypt the userdata now
+	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
 	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
 	userDataMap[hashedUsername] = cipher
 
+	delete(shareDataMap, msgid)
+	bytes, err = json.Marshal(shareDataMap)
+	if err != nil {
+		return err
+	}
+	userlib.DatastoreSet(shareDatastring, bytes) //store the encrypted sharemsg []byte in Datastore
 	bytes, err = json.Marshal(userDataMap)
 	if err != nil {
 		return err
 	}
-
 	userlib.DatastoreSet(userDataString, bytes)
+
 	return nil
 }
 
 // Removes access for all others.
 func (userdata *User) RevokeFile(filename string) (err error) {
-	/*fmt.Println("[RevokeFile]")*/
+	userlib.DebugMsg("[RevokeFile]")
 	metadataIndexHashed := userdata.MetadataIndex[filename]
 	val, ok := userlib.DatastoreGet(metadataIndexHashed)
 	if !ok {
@@ -944,6 +1046,7 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	if err != nil {
 		return
 	}
+	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
 	cipher, _ = GetCFBEncrypt(userdata.SymmetricKey, userdataBytes, userDataIV)
 	userDataMap[hashedUsername] = cipher
 

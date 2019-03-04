@@ -9,15 +9,15 @@ import (
 )
 
 /*func TestCFB(t *testing.T) {
- *  key := []byte("example key 1234")
- *  msg := "This is a Test"
- *  ciphertext, iv := GetCFBEncrypt(key, []byte(msg), nil)
- *
- *  plaintext := GetCFBDecrypt(key, ciphertext, iv)
- *  if msg != string(plaintext) {
- *    t.Error("Decryption Failed")
- *  }
- *}*/
+*  key := []byte("example key 1234")
+*  msg := "This is a Test"
+*  ciphertext, iv := GetCFBEncrypt(key, []byte(msg), nil)
+*
+*  plaintext := GetCFBDecrypt(key, ciphertext, iv)
+*  if msg != string(plaintext) {
+	*    t.Error("Decryption Failed")
+	*  }
+	*}*/
 
 // You can actually import other stuff if you want IN YOUR TEST
 // HARNESS ONLY.  Note that this is NOT considered part of your
@@ -85,9 +85,9 @@ func TestStorage(t *testing.T) {
 	v3 := []byte("<3 November Rain!")
 
 	/*err = u.AppendFile("file2", v3)
-	 *if err != nil {
-	 *  t.Error(err)
-	 *}*/
+	*if err != nil {
+		*  t.Error(err)
+		*}*/
 	err = u.AppendFile("file1", v3)
 	if err != nil {
 		t.Error(err)
@@ -128,7 +128,7 @@ func TestShare(t *testing.T) {
 	if err != nil {
 		t.Error("Failed to load user", err)
 	}
-	v3 := []byte("Oh, this is a new FILE!!!!")
+	v3 := []byte("[1] New File!")
 	alice.StoreFile(file1, v3)
 	bob, err2 := InitUser("bob", "foobar")
 	if err2 != nil {
@@ -136,15 +136,15 @@ func TestShare(t *testing.T) {
 	}
 
 	var v, v2 []byte
-	var msgid string
 	v, err = alice.LoadFile(file1)
 	if err != nil {
 		t.Error("Failed to download the file from alice", err)
+	} else {
+		t.Logf("User %s, filename %s, data = %s\n", alice.Username, file1, v)
 	}
 
-	t.Logf("User %s, filename %s, data = %s\n", alice.Username, file1, v)
+	var msgid string
 	msgid, err = alice.ShareFile("file1", "bob")
-	t.Log(msgid)
 	if err != nil {
 		t.Error("Failed to share the file", err)
 	}
@@ -153,7 +153,6 @@ func TestShare(t *testing.T) {
 		t.Error("Failed to receive the share message", err)
 	}
 
-	t.Log("This is wonderful! File got shared! :)\n")
 	v, err = bob.LoadFile("file2")
 	if err != nil {
 		t.Error("Failed to download the file from alice", err)
@@ -178,25 +177,25 @@ func TestShare(t *testing.T) {
 	if err != nil {
 		t.Error("Failed to share the file", err)
 	}
-	err = charlie.ReceiveFile("file3", "bob", msgid)
+	err = charlie.ReceiveFile("file2", "bob", msgid)
 	if err != nil {
 		t.Error("Failed to receive the share message", err)
 	}
-	v, err = charlie.LoadFile("file3")
+	v, err = charlie.LoadFile("file2")
 	if err != nil {
 		t.Error("Failed to download the file from bob", err)
 	} else {
-		t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
+		t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file2", v)
 	}
 
 	// Let Charlie append something
-	charlie.AppendFile("file3", []byte("This is new Text added by Charlie"))
+	charlie.AppendFile("file2", []byte("This is new Text added by Charlie"))
 	// View Charlie's changes
-	v, err = charlie.LoadFile("file3")
+	v, err = charlie.LoadFile("file2")
 	if err != nil {
 		t.Error("Failed to download the file from charlie", err)
 	} else {
-		t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file3", v)
+		t.Logf("User %s, filename %s, data = %s\n", charlie.Username, "file2", v)
 	}
 
 	// View Alice's changes
@@ -215,10 +214,10 @@ func TestShare(t *testing.T) {
 	}
 
 	/*PrettyPrint(alice)
-	 *PrettyPrint(bob)
-	 *PrettyPrint(charlie)*/
+	*PrettyPrint(bob)
+	*PrettyPrint(charlie)*/
 
-	err = charlie.RevokeFile("file3")
+	err = charlie.RevokeFile("file2")
 	if err != nil {
 		t.Error(err)
 	}
@@ -246,4 +245,29 @@ func TestShare(t *testing.T) {
 	} else {
 		t.Logf("User %s, filename %s, data = %s\n", alice.Username, "file1", v)
 	}
+}
+
+func TestMultiUser(t *testing.T) {
+	userlib.DebugPrint = true
+	user1, err := GetUser("alice", "foobar")
+	if err != nil {
+		t.Error("Failed to get user")
+	}
+	user1again, err := GetUser("alice", "foobar")
+	if err != nil {
+		t.Error("Failed to get user")
+	}
+	t1 := []byte("This is life")
+	user1.StoreFile("file", t1)
+	/*  m, err := user1again.LoadFile("file")
+	 *  if err != nil {
+	 *    t.Error(err)
+	 *  }
+	 *
+	 *  t.Log("Contents:", string(m))*/
+	t2 := []byte("fthis")
+	user1again.AppendFile("file", t2)
+	m, _ := user1.LoadFile("file")
+	t.Log("Contents:", string(m))
+
 }

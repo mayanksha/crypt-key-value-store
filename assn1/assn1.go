@@ -53,13 +53,16 @@ type FileSharingKey []byte
 // You may want to define what you actually want to pass as a
 // sharingRecord to serialized/deserialize in the data store.
 type sharingRecord struct {
+	EncFileKey []byte // Decrypt and Unmarshal to get FileSharingKey type
+	EncData    []byte // Decrypt and Unmarshal to get ShareData type
+	IV         []byte
+}
+type ShareData struct {
 	MetadataIndex string
 	MetadataIV    []byte
-	FileKey       []byte
 	UUIDnonce     uuid.UUID
 	RSAsignature  []byte
 }
-
 type FileCredentials struct {
 	MetaDataIV []byte
 	FileKey    FileSharingKey
@@ -756,24 +759,25 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	}
 	var sharemsg sharingRecord
 
-	sharemsg.MetadataIndex = metadataIndexHashed
-	sharemsg.MetadataIV = fileKeys.MetaDataIV
+	fileKey := userdata.FileKeys[filename].FileKey
 	// Just encrypt the filekey with public key
-	sharemsg.FileKey, err = userlib.RSAEncrypt(&Rekey, []byte(userdata.FileKeys[filename].FileKey), nil)
+	sharemsg.EncFileKey, err = userlib.RSAEncrypt(&Rekey, userdata.FileKeys[filename].FileKey, nil)
 	if err != nil {
 		return "", err
 	}
-	// To prevent a replay attack
-	sharemsg.UUIDnonce = uuid.New()
+	var shareData ShareData
+	shareData.MetadataIndex = metadataIndexHashed
+	shareData.MetadataIV = fileKeys.MetaDataIV
+	shareData.UUIDnonce = uuid.New()
 
-	sharingRecordSUM := sharemsg.MetadataIndex + sharemsg.UUIDnonce.String() + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
-	//take  hash  for signature
+	sharingRecordSUM := shareData.MetadataIndex +
+		shareData.UUIDnonce.String() + hex.EncodeToString(sharemsg.EncFileKey)
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
+	shareData.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH))
 
-	sharemsg.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH))
-
-	randUUID := uuid.New().String()
-	shareid := Argon2Hash(randUUID)
+	// Encrypt the shareData struct
+	bytes, _ := json.Marshal(sharemsg)
+	sharemsg.EncData, sharemsg.IV = GetCFBEncrypt(fileKey, bytes, nil)
 
 	var shareDataMap map[string][]byte
 	_, ok = userlib.DatastoreGet(shareDatastring)
@@ -788,13 +792,15 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	val, ok := userlib.DatastoreGet(shareDatastring)
 	json.Unmarshal(val, &shareDataMap)
 
+	// Generate a new Sharing ID
+	shareid := Argon2Hash(uuid.New().String())
 	_, ok = shareDataMap[shareid]
 	if ok {
 		return "", errors.New("[ShareFile]: Random Hash Collision")
 	}
 
 	/*PrettyPrint(sharemsg)*/
-	bytes, err := json.Marshal(sharemsg)
+	bytes, err = json.Marshal(sharemsg)
 	if err != nil {
 		return "", err
 	}
@@ -804,12 +810,6 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 		return "", err
 	}
 	userlib.DatastoreSet(shareDatastring, bytes) //store the encrypted sharemsg []byte in Datastore
-
-	/*val, ok = userlib.DatastoreGet(shareDatastring)
-	 *json.Unmarshal(val, &shareDataMap)
-	 *bytes, ok = shareDataMap[msgid]
-	 *json.Unmarshal(bytes, &sharemsg)
-	 *PrettyPrint(sharemsg)*/
 	return shareid, err
 }
 
@@ -843,6 +843,8 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	var sharemsg sharingRecord
 	json.Unmarshal(bytes, &sharemsg)
 
+	fileKey, err := userlib.RSADecrypt(&userdata.PrivateKey, sharemsg.EncFileKey, nil)
+
 	// Pubkey of sender  from keyStore
 	Sekey, ok := userlib.KeystoreGet(sender)
 	if !ok {
@@ -857,12 +859,11 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 		return errors.New("[ReceiveFile]: RSA signature is Invalid")
 	}
 	// Decrypt the file key with Private Key of recipient
-	decrypted, err := userlib.RSADecrypt(&userdata.PrivateKey, sharemsg.FileKey, nil)
 	if err != nil {
 		return err
 	}
 	// update users.filekey
-	userdata.FileKeys[filename] = FileCredentials{sharemsg.MetadataIV, FileSharingKey(decrypted)}
+	userdata.FileKeys[filename] = FileCredentials{sharemsg.MetadataIV, FileSharingKey(fileKey)}
 	userdata.MetadataIndex[filename] = sharemsg.MetadataIndex
 	userdata.HMAC, _ = UserHMAC(*userdata)
 

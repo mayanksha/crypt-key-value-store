@@ -310,8 +310,13 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		err := errors.New("[GetUser]: User not present in Datastore.")
 		return nil, err
 	}
+
+	if len(val) < userlib.BlockSize {
+		return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	// Below val is the actual decrypted bytes of User struct
 	userDataIV := GetIV(GetIV([]byte(username)))
+
 	val = GetCFBDecrypt(hashedPass, val, userDataIV)
 	var userdata User
 	json.Unmarshal(val, &userdata)
@@ -368,6 +373,10 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 		metadataIV = nil
 	}
 	if ok {
+
+		if len(val) < userlib.BlockSize {
+			return
+		}
 		val = GetCFBDecrypt([]byte(fileKeys.FileKey), val, metadataIV)
 		json.Unmarshal(val, &oldMetadata)
 
@@ -483,6 +492,10 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	userlib.DatastoreSet(metadataIndexHashed, cipher)
 
 	val, ok = userlib.DatastoreGet(metadataIndexHashed)
+
+	if len(val) < userlib.BlockSize {
+		panic(errors.New("[GetUser]: cipher length should > aes.BlockSize"))
+	}
 	val = GetCFBDecrypt(fileKey, val, metadataIV)
 	json.Unmarshal(val, &metadata)
 	// ********************
@@ -528,6 +541,11 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	}
 	// Below val is the actual decrypted bytes of User struct
 	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
+
 	val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
 	var getUserAgain User
 	json.Unmarshal(val, &getUserAgain)
@@ -547,6 +565,10 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		metadataIV = fileKeys.MetaDataIV
 	} else {
 		return errors.New("[AppendFile]: userdata.FileKeys[filename] returned nothing")
+	}
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
 	}
 	val = GetCFBDecrypt([]byte(fileKeys.FileKey), val, metadataIV)
 
@@ -647,6 +669,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 	}
 	// Below val is the actual decrypted bytes of User struct
 	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
+
+	if len(val) < userlib.BlockSize {
+		return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
 	var getUserAgain User
 	json.Unmarshal(val, &getUserAgain)
@@ -671,6 +697,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		return nil, errors.New("[LoadFile]: userdata.FileKeys[filename] returned nothing")
 	}
 	fileKey := userdata.FileKeys[filename].FileKey
+
+	if len(val) < userlib.BlockSize {
+		return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(fileKey, val, metadataIV)
 	//get file key
 	var metadata MetaData
@@ -697,6 +727,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 			return nil, errors.New("[LoadFile]: Failed")
 		}
 		var block Block
+
+		if len(val) < userlib.BlockSize {
+			return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+		}
 		val = GetCFBDecrypt([]byte(fileKey), val, prevBlockIV)
 		json.Unmarshal(val, &block)
 
@@ -906,6 +940,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	}
 	oldFilekey := fileKeys.FileKey
 	metadataIV := fileKeys.MetaDataIV
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(oldFilekey, val, metadataIV)
 
 	var metadata MetaData
@@ -933,6 +971,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 			return errors.New("[RevokeFile]: Failed")
 		}
 		var block Block
+
+		if len(val) < userlib.BlockSize {
+			return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+		}
 		val = GetCFBDecrypt([]byte(oldFilekey), val, prevBlockIV)
 		json.Unmarshal(val, &block)
 
@@ -969,6 +1011,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	userlib.DatastoreSet(metadataIndexHashed, cipher)
 
 	val, ok = userlib.DatastoreGet(metadataIndexHashed)
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(newFilekey, val, metadataIV)
 	json.Unmarshal(val, &metadata)
 

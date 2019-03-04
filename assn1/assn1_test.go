@@ -270,3 +270,6 @@ func TestMultiUser(t *testing.T) {
 	t.Log("Contents:", string(m))
 
 }
+
+func TestMutate(t *testing.T) {
+}

@@ -84,6 +84,14 @@ type Block struct {
 	HMAC          []byte
 }
 
+func StoreUserDataMap(userdata *User, userDataMap *map[string][]byte) {
+	bytes, _ := json.Marshal(userdata)
+	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
+	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
+	(*userDataMap)[Argon2Hash(userdata.Username)] = cipher
+	bytes, _ = json.Marshal(userDataMap)
+	userlib.DatastoreSet(userDataString, bytes)
+}
 func GetCFBEncrypt(key []byte, msg []byte, givenIV []byte) (ciphertext []byte, iv []byte) {
 	ciphertext = make([]byte, len(key)+len(msg))
 	iv = ciphertext[:len(key)]
@@ -247,16 +255,12 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 			return nil, err
 		}
 		userlib.DatastoreSet(userDataString, bytes)
-	} else {
-		// TODO: let a user change his password?
 	}
 	hashedPass := Argon2PasswordHash(password)
 	val, ok := userlib.DatastoreGet(userDataString)
 
 	var userDataMap map[string][]byte
 	json.Unmarshal(val, &userDataMap)
-
-	hashedUsername := Argon2Hash(username)
 
 	key, err := userlib.GenerateRSAKey()
 	if err != nil {
@@ -279,21 +283,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := json.Marshal(userdata)
-	if err != nil {
-		return nil, err
-	}
-
-	/*fmt.Printf("Symm len = %d, IV Len = %d\n", len(userdata.SymmetricKey), len(userDataIV))*/
-	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
-	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
-	userDataMap[hashedUsername] = cipher
-
-	bytes, err = json.Marshal(userDataMap)
-	if err != nil {
-		return nil, err
-	}
-	userlib.DatastoreSet(userDataString, bytes)
+	StoreUserDataMap(&userdata, &userDataMap)
 	return &userdata, err
 }
 
@@ -301,9 +291,6 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 // fail with an error if the user/password is invalid, or if the user
 // data was corrupted, or if the user can't be found.
 
-/*
- *		TODO: check for encryption, make all the errors same
- */
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	hashedPass := Argon2PasswordHash(password)
 	// val contains the byte slice for the whole userDataMap
@@ -357,11 +344,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 		return
 	}
 
-	/*
-	 * TODO: Store encrypted filenames in FilenameMap (is it even useful?)
-	 * Perform Full Encryption
-	 **/
-
 	// The file's MetaData is indexed into datastore by the string
 	var oldMetadata MetaData
 	var metadata MetaData
@@ -401,15 +383,11 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 			panic(errors.New("[StoreFile]: Someone tried to store a file of which he wasn't the owner."))
 		}
 
-		// TODO: Encryption with below key
 		fileKey = fileKeys.FileKey
 		// Set new Owner
 		metadata.Owner = userdata.Username
 		hashedUsername := Argon2Hash(userdata.Username)
 		metadata.LastEditBy = hashedUsername
-		/*
-		 *  TODO: FilenameMap isn't updated anywhere
-		 **/
 		metadata.FilenameMap = oldMetadata.FilenameMap
 
 	} else {
@@ -453,8 +431,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	var userDataMap map[string][]byte
 	json.Unmarshal(val, &userDataMap)
 
-	// TODO: CFB encryption using Symmetric Key
-	hashedUsername := Argon2Hash(userdata.Username)
 	// Marshal Metadata and store in Datastore
 
 	_, ok = userlib.DatastoreGet(metadata.GenesisBlock)
@@ -464,7 +440,6 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 		panic(errString)
 	}
 
-	// TODO Encryption
 	// For the Genesis Block, PrevBlockHash must be ""
 	var block Block
 	block.Owner = metadata.Owner
@@ -519,19 +494,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 		panic(err)
 	}
 	userdata.HMAC = hmac
-	userdataBytes, err := json.Marshal(userdata)
-	if err != nil {
-		return
-	}
-	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
-	cipher, _ = GetCFBEncrypt(userdata.SymmetricKey, userdataBytes, userDataIV)
-	userDataMap[hashedUsername] = cipher
-
-	userDataMapBytes, err := json.Marshal(userDataMap)
-	if err != nil {
-		return
-	}
-	userlib.DatastoreSet(userDataString, userDataMapBytes)
+	StoreUserDataMap(userdata, &userDataMap)
 	// ********************
 	return
 }
@@ -591,7 +554,6 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	//get file key
 	fileKey := userdata.FileKeys[filename].FileKey
 
-	//decrypt the file-TODO
 	var metadata MetaData
 	json.Unmarshal(val, &metadata)
 
@@ -797,7 +759,7 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	sharemsg.MetadataIndex = metadataIndexHashed
 	sharemsg.MetadataIV = fileKeys.MetaDataIV
 	// Just encrypt the filekey with public key
-	sharemsg.FileKey, err = userlib.RSAEncrypt(&Rekey, []byte(userdata.FileKeys[filename].FileKey), nil) // TODO TAG in RSAENCRYPT
+	sharemsg.FileKey, err = userlib.RSAEncrypt(&Rekey, []byte(userdata.FileKeys[filename].FileKey), nil)
 	if err != nil {
 		return "", err
 	}
@@ -918,15 +880,7 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 		return errors.New("[ReceiveFile]: Errors while getting user from userDataMap")
 	}
 
-	// Marshal the userdata
-	bytes, err = json.Marshal(userdata)
-	if err != nil {
-		return err
-	}
-	// Encrypt the userdata now
-	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
-	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
-	userDataMap[hashedUsername] = cipher
+	StoreUserDataMap(userdata, &userDataMap)
 
 	delete(shareDataMap, msgid)
 	bytes, err = json.Marshal(shareDataMap)
@@ -934,12 +888,6 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 		return err
 	}
 	userlib.DatastoreSet(shareDatastring, bytes) //store the encrypted sharemsg []byte in Datastore
-	bytes, err = json.Marshal(userDataMap)
-	if err != nil {
-		return err
-	}
-	userlib.DatastoreSet(userDataString, bytes)
-
 	return nil
 }
 
@@ -960,9 +908,6 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	metadataIV := fileKeys.MetaDataIV
 	val = GetCFBDecrypt(oldFilekey, val, metadataIV)
 
-	// TODO: Decrypt the metadata here using the file
-	// TODO: Check if the owner is the same
-	// Decrypt the bytes, then unmarshal
 	var metadata MetaData
 	json.Unmarshal(val, &metadata)
 
@@ -1003,7 +948,7 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 		// Now re-encrypt the block with newfilekey
 		blockBytes, err := json.Marshal(block)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		cipher, _ := GetCFBEncrypt(newFilekey, blockBytes, prevBlockIV)
 		userlib.DatastoreSet(prevBlockHash, cipher)
@@ -1033,8 +978,6 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	var userDataMap map[string][]byte
 	json.Unmarshal(val, &userDataMap)
 
-	hashedUsername := Argon2Hash(userdata.Username)
-
 	userdata.FileKeys[filename] = FileCredentials{metadataIV, newFilekey}
 	hmac, err = UserHMAC(*userdata)
 	if err != nil {
@@ -1042,20 +985,7 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	}
 	userdata.HMAC = hmac
 
-	userdataBytes, err := json.Marshal(userdata)
-	if err != nil {
-		return
-	}
-	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
-	cipher, _ = GetCFBEncrypt(userdata.SymmetricKey, userdataBytes, userDataIV)
-	userDataMap[hashedUsername] = cipher
-
-	userDataMapBytes, err := json.Marshal(userDataMap)
-	if err != nil {
-		return
-	}
-	userlib.DatastoreSet(userDataString, userDataMapBytes)
-
+	StoreUserDataMap(userdata, &userDataMap)
 	/*val, ok = userDataMap[hashedUsername]
 	 *if !ok {
 	 *  err := errors.New("[GetUser]: User not present in Datastore.")

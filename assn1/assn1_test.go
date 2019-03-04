@@ -46,6 +46,7 @@ func TestInit(t *testing.T) {
 		// t.Error says the test fails
 		t.Error("Failed to initialize user", err)
 	}
+
 	// t.Log() only produces output if you run with "go test -v"
 	// You probably want many more tests here.
 }
@@ -54,7 +55,6 @@ func TestStorage(t *testing.T) {
 	// And some more tests, because
 	username := "alice"
 	password := "fubar"
-
 	t.Logf("username = %v, password = %v\n", username, password)
 	u, err := GetUser(username, password)
 	if err != nil {
@@ -246,4 +246,19 @@ func TestShare(t *testing.T) {
 	} else {
 		t.Logf("User %s, filename %s, data = %s\n", alice.Username, "file1", v)
 	}
+}
+func TestMultiUser(t *testing.T) {
+	userlib.DebugPrint = true
+	user1, _ := GetUser("alice", "foobar")
+	user1again, _ := GetUser("alice", "foobar")
+	t1 := []byte("This is life")
+	user1.StoreFile("file", t1)
+	m, _ := user1again.LoadFile("file")
+
+	t.Log("Contents:", string(m))
+	t2 := []byte("fthis")
+	user1.AppendFile("file", t2)
+	m, _ = user1again.LoadFile("file")
+	t.Log("Contents:", string(m))
+
 }

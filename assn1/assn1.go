@@ -35,8 +35,7 @@ var fileBlocksString string = Argon2Hash("FileBlocksString")
 var metaDataString string = Argon2Hash("MetaDataString")
 var userDataString string = Argon2Hash("UserDataString")
 var shareDatastring string = Argon2Hash("ShareDataString")
-
-/*var userDataIV []byte = userlib.RandomBytes(userlib.BlockSize)*/
+var IVstring string = Argon2Hash("InitVector")
 
 // The structure definition for a user record
 type User struct {
@@ -53,16 +52,13 @@ type FileSharingKey []byte
 // You may want to define what you actually want to pass as a
 // sharingRecord to serialized/deserialize in the data store.
 type sharingRecord struct {
-	EncFileKey []byte // Decrypt and Unmarshal to get FileSharingKey type
-	EncData    []byte // Decrypt and Unmarshal to get ShareData type
-	IV         []byte
-}
-type ShareData struct {
 	MetadataIndex string
 	MetadataIV    []byte
+	FileKey       []byte
 	UUIDnonce     uuid.UUID
 	RSAsignature  []byte
 }
+
 type FileCredentials struct {
 	MetaDataIV []byte
 	FileKey    FileSharingKey
@@ -89,20 +85,33 @@ type Block struct {
 
 func StoreUserDataMap(userdata *User, userDataMap *map[string][]byte) {
 	bytes, _ := json.Marshal(userdata)
-	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
-	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, userDataIV)
+
+	iv := GetNewIV()
+
+	cipher, _ := GetCFBEncrypt(userdata.SymmetricKey, bytes, iv)
 	(*userDataMap)[Argon2Hash(userdata.Username)] = cipher
 	bytes, _ = json.Marshal(userDataMap)
+
 	userlib.DatastoreSet(userDataString, bytes)
+	userlib.DatastoreSet(Argon2Hash(userdata.Username)+IVstring, iv)
 }
+
+func GetNewIV() (iv []byte) {
+	iv = make([]byte, userlib.BlockSize)
+	copy(iv, userlib.RandomBytes(userlib.BlockSize))
+	return
+}
+
 func GetCFBEncrypt(key []byte, msg []byte, givenIV []byte) (ciphertext []byte, iv []byte) {
 	ciphertext = make([]byte, len(key)+len(msg))
 	iv = ciphertext[:len(key)]
-	if givenIV == nil {
-		// Load random data
+
+	if len(givenIV) < userlib.BlockSize {
+		// Load random data:w
 		copy(iv, userlib.RandomBytes(len(key)))
 	} else {
 		copy(iv, givenIV)
+
 	}
 	/*fmt.Println(hex.EncodeToString(key))
 	 *fmt.Println(hex.EncodeToString(iv))*/
@@ -134,8 +143,9 @@ func Argon2PasswordHash(password string) []byte {
 	return userlib.Argon2Key([]byte(password), nil, uint32(userlib.BlockSize))
 }
 
-func GetIV(str []byte) []byte {
-	return userlib.Argon2Key(str, nil, uint32(userlib.BlockSize))
+func GetUserIV(username string) (iv []byte) {
+	iv, _ = userlib.DatastoreGet(Argon2Hash(username) + IVstring)
+	return
 }
 
 func MetadataHMAC(metadata MetaData, SymmetricKey []byte) ([]byte, error) {
@@ -281,7 +291,6 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdata.PrivateKey = *key
 	userdata.FileKeys = make(map[string]FileCredentials)
 	userdata.MetadataIndex = make(map[string]string)
-
 	userdata.HMAC, err = UserHMAC(userdata)
 	if err != nil {
 		return nil, err
@@ -313,8 +322,13 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 		err := errors.New("[GetUser]: User not present in Datastore.")
 		return nil, err
 	}
+
+	if len(val) < userlib.BlockSize {
+		return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	// Below val is the actual decrypted bytes of User struct
-	userDataIV := GetIV(GetIV([]byte(username)))
+	userDataIV := GetUserIV(username)
+
 	val = GetCFBDecrypt(hashedPass, val, userDataIV)
 	var userdata User
 	json.Unmarshal(val, &userdata)
@@ -371,6 +385,10 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 		metadataIV = nil
 	}
 	if ok {
+
+		if len(val) < userlib.BlockSize {
+			return
+		}
 		val = GetCFBDecrypt([]byte(fileKeys.FileKey), val, metadataIV)
 		json.Unmarshal(val, &oldMetadata)
 
@@ -486,6 +504,10 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	userlib.DatastoreSet(metadataIndexHashed, cipher)
 
 	val, ok = userlib.DatastoreGet(metadataIndexHashed)
+
+	if len(val) < userlib.BlockSize {
+		panic(errors.New("[GetUser]: cipher length should > aes.BlockSize"))
+	}
 	val = GetCFBDecrypt(fileKey, val, metadataIV)
 	json.Unmarshal(val, &metadata)
 	// ********************
@@ -530,7 +552,12 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		return err
 	}
 	// Below val is the actual decrypted bytes of User struct
-	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
+	userDataIV := GetUserIV(userdata.Username)
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
+
 	val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
 	var getUserAgain User
 	json.Unmarshal(val, &getUserAgain)
@@ -550,6 +577,10 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		metadataIV = fileKeys.MetaDataIV
 	} else {
 		return errors.New("[AppendFile]: userdata.FileKeys[filename] returned nothing")
+	}
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
 	}
 	val = GetCFBDecrypt([]byte(fileKeys.FileKey), val, metadataIV)
 
@@ -649,7 +680,11 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		return nil, err
 	}
 	// Below val is the actual decrypted bytes of User struct
-	userDataIV := GetIV(GetIV([]byte(userdata.Username)))
+	userDataIV := GetUserIV(userdata.Username)
+
+	if len(val) < userlib.BlockSize {
+		return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
 	var getUserAgain User
 	json.Unmarshal(val, &getUserAgain)
@@ -674,6 +709,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		return nil, errors.New("[LoadFile]: userdata.FileKeys[filename] returned nothing")
 	}
 	fileKey := userdata.FileKeys[filename].FileKey
+
+	if len(val) < userlib.BlockSize {
+		return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(fileKey, val, metadataIV)
 	//get file key
 	var metadata MetaData
@@ -700,6 +739,10 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 			return nil, errors.New("[LoadFile]: Failed")
 		}
 		var block Block
+
+		if len(val) < userlib.BlockSize {
+			return nil, errors.New("[GetUser]: cipher length should > aes.BlockSize")
+		}
 		val = GetCFBDecrypt([]byte(fileKey), val, prevBlockIV)
 		json.Unmarshal(val, &block)
 
@@ -759,25 +802,24 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	}
 	var sharemsg sharingRecord
 
-	fileKey := userdata.FileKeys[filename].FileKey
+	sharemsg.MetadataIndex = metadataIndexHashed
+	sharemsg.MetadataIV = fileKeys.MetaDataIV
 	// Just encrypt the filekey with public key
-	sharemsg.EncFileKey, err = userlib.RSAEncrypt(&Rekey, userdata.FileKeys[filename].FileKey, nil)
+	sharemsg.FileKey, err = userlib.RSAEncrypt(&Rekey, []byte(userdata.FileKeys[filename].FileKey), nil)
 	if err != nil {
 		return "", err
 	}
-	var shareData ShareData
-	shareData.MetadataIndex = metadataIndexHashed
-	shareData.MetadataIV = fileKeys.MetaDataIV
-	shareData.UUIDnonce = uuid.New()
+	// To prevent a replay attack
+	sharemsg.UUIDnonce = uuid.New()
 
-	sharingRecordSUM := shareData.MetadataIndex +
-		shareData.UUIDnonce.String() + hex.EncodeToString(sharemsg.EncFileKey)
+	sharingRecordSUM := sharemsg.MetadataIndex + sharemsg.UUIDnonce.String() + hex.EncodeToString([]byte(sharemsg.FileKey)) + hex.EncodeToString([]byte(sharemsg.UUIDnonce.String()))
+	//take  hash  for signature
 	sharingRecordHASH := Argon2Hash(sharingRecordSUM)
-	shareData.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH))
 
-	// Encrypt the shareData struct
-	bytes, _ := json.Marshal(sharemsg)
-	sharemsg.EncData, sharemsg.IV = GetCFBEncrypt(fileKey, bytes, nil)
+	sharemsg.RSAsignature, err = userlib.RSASign(&userdata.PrivateKey, []byte(sharingRecordHASH))
+
+	randUUID := uuid.New().String()
+	shareid := Argon2Hash(randUUID)
 
 	var shareDataMap map[string][]byte
 	_, ok = userlib.DatastoreGet(shareDatastring)
@@ -792,15 +834,13 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 	val, ok := userlib.DatastoreGet(shareDatastring)
 	json.Unmarshal(val, &shareDataMap)
 
-	// Generate a new Sharing ID
-	shareid := Argon2Hash(uuid.New().String())
 	_, ok = shareDataMap[shareid]
 	if ok {
 		return "", errors.New("[ShareFile]: Random Hash Collision")
 	}
 
 	/*PrettyPrint(sharemsg)*/
-	bytes, err = json.Marshal(sharemsg)
+	bytes, err := json.Marshal(sharemsg)
 	if err != nil {
 		return "", err
 	}
@@ -810,6 +850,12 @@ func (userdata *User) ShareFile(filename string, recipient string) (msgid string
 		return "", err
 	}
 	userlib.DatastoreSet(shareDatastring, bytes) //store the encrypted sharemsg []byte in Datastore
+
+	/*val, ok = userlib.DatastoreGet(shareDatastring)
+	 *json.Unmarshal(val, &shareDataMap)
+	 *bytes, ok = shareDataMap[msgid]
+	 *json.Unmarshal(bytes, &sharemsg)
+	 *PrettyPrint(sharemsg)*/
 	return shareid, err
 }
 
@@ -843,8 +889,6 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 	var sharemsg sharingRecord
 	json.Unmarshal(bytes, &sharemsg)
 
-	fileKey, err := userlib.RSADecrypt(&userdata.PrivateKey, sharemsg.EncFileKey, nil)
-
 	// Pubkey of sender  from keyStore
 	Sekey, ok := userlib.KeystoreGet(sender)
 	if !ok {
@@ -859,11 +903,12 @@ func (userdata *User) ReceiveFile(filename string, sender string, msgid string) 
 		return errors.New("[ReceiveFile]: RSA signature is Invalid")
 	}
 	// Decrypt the file key with Private Key of recipient
+	decrypted, err := userlib.RSADecrypt(&userdata.PrivateKey, sharemsg.FileKey, nil)
 	if err != nil {
 		return err
 	}
 	// update users.filekey
-	userdata.FileKeys[filename] = FileCredentials{sharemsg.MetadataIV, FileSharingKey(fileKey)}
+	userdata.FileKeys[filename] = FileCredentials{sharemsg.MetadataIV, FileSharingKey(decrypted)}
 	userdata.MetadataIndex[filename] = sharemsg.MetadataIndex
 	userdata.HMAC, _ = UserHMAC(*userdata)
 
@@ -907,6 +952,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	}
 	oldFilekey := fileKeys.FileKey
 	metadataIV := fileKeys.MetaDataIV
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(oldFilekey, val, metadataIV)
 
 	var metadata MetaData
@@ -934,6 +983,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 			return errors.New("[RevokeFile]: Failed")
 		}
 		var block Block
+
+		if len(val) < userlib.BlockSize {
+			return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+		}
 		val = GetCFBDecrypt([]byte(oldFilekey), val, prevBlockIV)
 		json.Unmarshal(val, &block)
 
@@ -970,6 +1023,10 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	userlib.DatastoreSet(metadataIndexHashed, cipher)
 
 	val, ok = userlib.DatastoreGet(metadataIndexHashed)
+
+	if len(val) < userlib.BlockSize {
+		return errors.New("[GetUser]: cipher length should > aes.BlockSize")
+	}
 	val = GetCFBDecrypt(newFilekey, val, metadataIV)
 	json.Unmarshal(val, &metadata)
 
@@ -993,7 +1050,7 @@ func (userdata *User) RevokeFile(filename string) (err error) {
 	 *  return err
 	 *}
 	 * Below val is the actual decrypted bytes of User struct
-	 *val = GetCFBDecrypt(userdata.SymmetricKey, val, userDataIV)
+	 *val = GetCFBDecrypt(userdata.SymmetricKey, val, serDataIV)
 	 *var foobar User
 	 *json.Unmarshal(val, &foobar)
 	 *PrettyPrint(foobar)*/
